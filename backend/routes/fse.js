@@ -17,22 +17,19 @@ router.get('/', async (req, res) => {
     const uniqueFSEs = [...new Set(accessList.map(a => a.fseName))].filter(Boolean);
     console.log(`✅ Found ${uniqueFSEs.length} unique FSEs in TideBT_Access:`, uniqueFSEs);
     
-    // Get employee details from Employees collection
-    console.log('🔍 Looking for employees with names:', uniqueFSEs);
+    // Get employee details from Employees collection (case-insensitive match)
+    const employees = await db.collection('Employees').find({}).toArray();
     
-    const employees = await db.collection('Employees').find({ 
-      newJoinerName: { $in: uniqueFSEs } 
-    }).toArray();
-    console.log(`✅ Found ${employees.length} matching employees`);
-    
-    // Build FSE list with details
+    // Build FSE list with details - use newJoinerName from Employees as primary name
     const fseList = uniqueFSEs.map(fseName => {
-      const emp = employees.find(e => e.newJoinerName === fseName);
+      // Case-insensitive match between TideBT_Access.fseName and Employees.newJoinerName
+      const emp = employees.find(e => 
+        e.newJoinerName?.toLowerCase().trim() === fseName?.toLowerCase().trim()
+      );
       const accessRecord = accessList.find(a => a.fseName === fseName);
-      console.log(`Matching ${fseName}:`, emp ? 'Found' : 'Not found');
       
       return {
-        name: fseName,
+        name: emp?.newJoinerName || fseName, // Use Employees name as primary (matches FSE panel)
         phone: emp?.newJoinerPhone || '',
         email: emp?.newJoinerEmailId || '',
         reportingManager: accessRecord?.tlName || emp?.reportingManager || '',

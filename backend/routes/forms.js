@@ -68,4 +68,38 @@ router.get('/stats', async (req, res) => {
   }
 });
 
+// GET /api/forms/by-employee/:name - Get all forms by a specific employee
+router.get('/by-employee/:name', async (req, res) => {
+  try {
+    const db = req.db;
+    const employeeName = decodeURIComponent(req.params.name);
+    
+    const forms = await db.collection('TideBT Form Responses')
+      .find({ employeeName: new RegExp(`^${employeeName}$`, 'i') })
+      .sort({ createdAt: -1 })
+      .toArray();
+    
+    const total = forms.length;
+    const onboarded = forms.filter(f => f.onboardingStatus === 'Completed').length;
+    const pending = forms.filter(f => f.onboardingStatus === 'Pending/Hold').length;
+    const readyForOnboarding = forms.filter(f => f.merchantOpinion === 'Ready For Onboarding').length;
+    const notInterested = forms.filter(f => f.merchantOpinion === 'Not interested').length;
+    
+    res.json({ 
+      success: true, 
+      forms,
+      total,
+      stats: {
+        onboarded,
+        pending,
+        readyForOnboarding,
+        notInterested
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching forms by employee:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;

@@ -55,48 +55,47 @@ router.get('/', async (req, res) => {
 router.get('/:name', async (req, res) => {
   try {
     const db = req.db;
-    const tlName = req.params.name;
+    const tlName = decodeURIComponent(req.params.name);
     
-    // Get TL from access list
-    const access = await db.collection('TideBT_Access').findOne({ 
-      name: tlName, 
-      role: 'TL' 
-    });
-    
-    if (!access) {
-      return res.status(404).json({ success: false, error: 'TL not found' });
-    }
-    
-    // Get TL details from Employees collection
-    const employee = await db.collection('Employees').findOne({ 
-      newJoinerName: tlName 
-    });
-    
-    // Get FSEs under this TL from Employees collection
-    const fseEmployees = await db.collection('Employees').find({ 
-      reportingManager: tlName
+    // Get FSEs under this TL from TideBT_Access
+    const accessList = await db.collection('TideBT_Access').find({ 
+      tlName: tlName,
+      hasTideBTAccess: true 
     }).toArray();
     
-    // Get form count
-    const formCount = await db.collection('TideBT Form Responses').countDocuments({ 
-      employeeName: tlName 
+    const fseNames = [...new Set(accessList.map(a => a.fseName))].filter(Boolean);
+    
+    // Get employee details
+    const employees = await db.collection('Employees').find({ 
+      newJoinerName: { $in: fseNames } 
+    }).toArray();
+    
+    // Get forms for all FSEs under this TL
+    const forms = await db.collection('TideBT Form Responses')
+      .find({ employeeName: { $in: fseNames } })
+      .sort({ createdAt: -1 })
+      .toArray();
+    
+    // Build FSE list
+    const fses = fseNames.map(fseName => {
+      const emp = employees.find(e => e.newJoinerName === fseName);
+      const fseFormCount = forms.filter(f => f.employeeName === fseName).length;
+      return {
+        name: fseName,
+        phone: emp?.newJoinerPhone || '',
+        email: emp?.newJoinerEmailId || '',
+        formCount: fseFormCount
+      };
     });
     
-    const tlDetails = {
-      name: access.name,
-      phone: employee?.newJoinerPhone || '',
-      email: employee?.newJoinerEmailId || '',
-      status: access.status || 'active',
-      createdAt: access.createdAt,
-      totalForms: formCount,
-      fses: fseEmployees.map(f => ({
-        name: f.newJoinerName,
-        email: f.newJoinerEmailId,
-        phone: f.newJoinerPhone
-      }))
-    };
-    
-    res.json({ success: true, tl: tlDetails });
+    res.json({ 
+      success: true, 
+      tlName,
+      fses,
+      forms,
+      totalFSEs: fses.length,
+      totalForms: forms.length
+    });
   } catch (error) {
     console.error('Error fetching TL details:', error);
     res.status(500).json({ success: false, error: error.message });

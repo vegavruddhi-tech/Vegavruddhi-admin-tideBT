@@ -4,6 +4,10 @@ import FSEOverview from "./pages/FSEOverview";
 import TLOverview from "./pages/TLOverview";
 import BTForms from "./pages/BTForms";
 import FundTransfer from "./pages/FundTransfer";
+import Reports from "./pages/Reports";
+import TLPerformance from "./pages/TLPerformance";
+import FSEPerformance from "./pages/FSEPerformance";
+import FinanceReport from "./pages/FinanceReport";
 import Login from "./pages/Login";
 
 import { ThemeProvider, createTheme, useTheme } from "@mui/material/styles";
@@ -32,11 +36,12 @@ import { BRAND } from "./theme";
 import "./App.css";
 
 const NAV_ITEMS = [
-  { value: "dashboard",     label: "Dashboard" },
-  { value: "fse",           label: "FSE Overview" },
-  { value: "tl",            label: "TL Overview" },
-  { value: "forms",         label: "BT Forms" },
-  { value: "fund-transfer", label: "Fund Transfer" },
+  { value: "dashboard",       label: "Dashboard" },
+  { value: "fse",             label: "FSE Overview" },
+  { value: "tl",              label: "TL Overview" },
+  { value: "reports",         label: "Reports" },
+  { value: "finance-report",  label: "Finance Report" },
+  { value: "fund-transfer",   label: "Fund Transfer" },
 ];
 
 // ── Responsive Navbar inner component (needs theme/breakpoints) ──
@@ -481,7 +486,8 @@ function App() {
             {page === "dashboard"     ? <Dashboard /> :
              page === "fse"           ? <FSEOverview /> :
              page === "tl"            ? <TLOverview /> :
-             page === "forms"         ? <BTForms /> :
+             page === "reports"       ? <Reports /> :
+             page === "finance-report"? <FinanceReport /> :
              page === "fund-transfer" ? <FundTransfer /> : null}
           </Box>
         </>
