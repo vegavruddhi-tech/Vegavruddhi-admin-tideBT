@@ -49,6 +49,8 @@ app.use('/api/fse', require('./routes/fse'));
 app.use('/api/tl', require('./routes/tl'));
 app.use('/api/forms', require('./routes/forms'));
 app.use('/api/fund-transfer', require('./routes/fundTransfer'));
+app.use('/api/rp-audit', require('./routes/rpAudit'));
+app.use('/api/targets', require('./routes/targets'));
 
 // Health check
 app.get('/health', async (req, res) => {

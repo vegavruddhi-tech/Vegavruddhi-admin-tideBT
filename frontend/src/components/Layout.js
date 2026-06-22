@@ -16,7 +16,6 @@ const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
   { text: 'FSE Overview', icon: <PeopleIcon />, path: '/fse' },
   { text: 'TL Overview', icon: <SupervisorAccountIcon />, path: '/tl' },
-  { text: 'BT Forms', icon: <DescriptionIcon />, path: '/forms' },
   { text: 'Fund Transfer', icon: <AccountBalanceIcon />, path: '/fund-transfer' },
 ];
 

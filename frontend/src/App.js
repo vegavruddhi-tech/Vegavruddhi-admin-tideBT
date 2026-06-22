@@ -3,11 +3,13 @@ import Dashboard from "./pages/Dashboard";
 import FSEOverview from "./pages/FSEOverview";
 import TLOverview from "./pages/TLOverview";
 import BTForms from "./pages/BTForms";
+import MobikwikForms from "./pages/MobikwikForms";
 import FundTransfer from "./pages/FundTransfer";
 import Reports from "./pages/Reports";
 import TLPerformance from "./pages/TLPerformance";
 import FSEPerformance from "./pages/FSEPerformance";
 import FinanceReport from "./pages/FinanceReport";
+import SetTargets from "./pages/SetTargets";
 import Login from "./pages/Login";
 
 import { ThemeProvider, createTheme, useTheme } from "@mui/material/styles";
@@ -39,9 +41,9 @@ const NAV_ITEMS = [
   { value: "dashboard",       label: "Dashboard" },
   { value: "fse",             label: "FSE Overview" },
   { value: "tl",              label: "TL Overview" },
-  { value: "reports",         label: "Reports" },
-  { value: "finance-report",  label: "Finance Report" },
+  { value: "set-targets",     label: "Set Targets" },
   { value: "fund-transfer",   label: "Fund Transfer" },
+  { value: "mobikwik-forms",  label: "Mobikwik Forms" },
 ];
 
 // ── Responsive Navbar inner component (needs theme/breakpoints) ──
@@ -163,6 +165,7 @@ function NavbarContent({ page, setPage, mode, setMode, user, handleLogout }) {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 {user?.picture && (
                   <Box component="img" src={user.picture} alt="avatar"
+                    referrerPolicy="no-referrer"
                     onError={e => { e.target.style.display = 'none'; }}
                     sx={{ width: 30, height: 30, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)' }} />
                 )}
@@ -235,6 +238,7 @@ function NavbarContent({ page, setPage, mode, setMode, user, handleLogout }) {
         <Box sx={{ px: 2.5, py: 1.5, display: "flex", alignItems: "center", gap: 1.5 }}>
           {user?.picture && (
             <Box component="img" src={user.picture} alt="avatar"
+              referrerPolicy="no-referrer"
               onError={e => { e.target.style.display = 'none'; }}
               sx={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)" }} />
           )}
@@ -486,9 +490,10 @@ function App() {
             {page === "dashboard"     ? <Dashboard /> :
              page === "fse"           ? <FSEOverview /> :
              page === "tl"            ? <TLOverview /> :
-             page === "reports"       ? <Reports /> :
-             page === "finance-report"? <FinanceReport /> :
-             page === "fund-transfer" ? <FundTransfer /> : null}
+             page === "set-targets"   ? <SetTargets /> :
+             page === "fund-transfer" ? <FundTransfer /> :
+             page === "bt-forms"      ? <BTForms /> :
+             page === "mobikwik-forms" ? <MobikwikForms /> : null}
           </Box>
         </>
       )}
