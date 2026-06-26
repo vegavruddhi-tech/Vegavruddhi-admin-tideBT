@@ -13,25 +13,46 @@ app.use(express.json());
 // Initialize ConnectionManager singleton
 const connectionManager = ConnectionManager.getInstance();
 
-// MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => {
-  console.log('✅ MongoDB Connected - Tide BT Admin Backend');
-  // Register mongoose connection with ConnectionManager
-  connectionManager.setMongooseConnection(mongoose.connection);
-})
-.catch(err => console.error('❌ MongoDB Connection Error:', err));
+// ── MongoDB Connection — cached for Vercel serverless cold starts ──────────
+let isConnected = false;
 
-// Middleware to ensure ConnectionManager is initialized and attach db to req
+async function connectDB() {
+  if (isConnected && mongoose.connection.readyState === 1) return;
+  try {
+    await mongoose.connect(process.env.MONGODB_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    });
+    isConnected = true;
+    connectionManager.setMongooseConnection(mongoose.connection);
+    console.log('✅ MongoDB Connected - Tide BT Admin Backend');
+  } catch (err) {
+    isConnected = false;
+    console.error('❌ MongoDB Connection Error:', err.message);
+    throw err;
+  }
+}
+
+// Ensure DB is connected before every request (critical for Vercel cold starts)
 app.use(async (req, res, next) => {
   try {
-    // Lazy initialize ConnectionManager on first request
+    await connectDB();
+    next();
+  } catch (err) {
+    return res.status(503).json({
+      success: false,
+      error: 'Database connection unavailable',
+      message: err.message
+    });
+  }
+});
+
+// Middleware to attach db to req
+app.use(async (req, res, next) => {
+  try {
     await connectionManager.ensureInitialized();
-    
-    // Attach database connection to request object
     req.db = connectionManager.getConnection();
     next();
   } catch (error) {
@@ -70,6 +91,11 @@ app.get('/health', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5001;
-app.listen(PORT, () => {
-  console.log(`🚀 Tide BT Admin Backend running on port ${PORT}`);
-});
+
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`🚀 Tide BT Admin Backend running on port ${PORT}`);
+  });
+}
+
+module.exports = app;
