@@ -137,8 +137,9 @@ async function run() {
     console.log(`🗑️  Cleared ${del.deletedCount} existing records.`);
   }
 
-  // ── Upsert by merchantNumber + fseName ────────────────────────────────────
-  let inserted = 0, updated = 0, skipped = 0;
+  // ── Upsert by merchantNumber + fseName in Bulk ─────────────────────────────
+  const operations = [];
+  let skipped = 0;
 
   for (const doc of docs) {
     if (!doc.merchantNumber && !doc.merchantName) { skipped++; continue; }
@@ -150,12 +151,30 @@ async function run() {
       filter.fseName = doc.fseName;
     } else { skipped++; continue; }
 
-    const result = await col.updateOne(filter, { $set: doc }, { upsert: true });
-    if (result.upsertedCount) inserted++;
-    else if (result.modifiedCount) updated++;
+    operations.push({
+      updateOne: {
+        filter,
+        update: { $set: doc },
+        upsert: true
+      }
+    });
   }
 
-  console.log(`✅ Done! Inserted: ${inserted} | Updated: ${updated} | Skipped: ${skipped}`);
+  console.log(`⚙️ Executing bulk write for ${operations.length} operations (Skipped: ${skipped})...`);
+
+  let inserted = 0, updated = 0;
+  if (operations.length > 0) {
+    const batchSize = 1000;
+    for (let i = 0; i < operations.length; i += batchSize) {
+      const batch = operations.slice(i, i + batchSize);
+      const result = await col.bulkWrite(batch);
+      inserted += result.upsertedCount || 0;
+      updated += result.modifiedCount || 0;
+      console.log(`   Processed batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(operations.length / batchSize)}`);
+    }
+  }
+
+  console.log(`✅ Done! Inserted/Upserted: ${inserted} | Updated/Modified: ${updated} | Skipped: ${skipped}`);
   await mongoose.connection.close();
 }
 
