@@ -1,6 +1,111 @@
 const express = require('express');
 const router = express.Router();
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'];
+
+const MONTH_ABBR = {
+  'JANUARY': 'JAN', 'FEBRUARY': 'FEB', 'MARCH': 'MAR', 'APRIL': 'APR',
+  'MAY': 'MAY', 'JUNE': 'JUN', 'JULY': 'JUL', 'AUGUST': 'AUG',
+  'SEPTEMBER': 'SEP', 'OCTOBER': 'OCT', 'NOVEMBER': 'NOV', 'DECEMBER': 'DEC'
+};
+
+// Helper: find BT_TL_CONNECT collection for a given month+year
+const findBTCollection = (allCollections, monthName, yearStr) => {
+  const mu    = monthName.toUpperCase();
+  const abbr  = MONTH_ABBR[mu] || mu;
+  const sy    = yearStr ? yearStr.slice(-2) : null;
+  const btCols = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
+  const tlCols = allCollections.filter(c => c.toUpperCase().includes('TL_CONNECT') && !c.toUpperCase().startsWith('BT_TL_CONNECT'));
+  const candidates = [...btCols, ...tlCols];
+  const matchesMonth = cu => cu.includes(mu) || cu.includes(abbr);
+  if (yearStr) {
+    const m = candidates.find(c => { const cu = c.toUpperCase(); return matchesMonth(cu) && (cu.includes(yearStr) || (sy && cu.includes(sy))); });
+    if (m) return m;
+  }
+  return candidates.find(c => matchesMonth(c.toUpperCase())) || null;
+};
+
+// Helper: compute cumulative carry-forward per person for all months before curMonth
+// Returns a map: { personName (lowercase) → carryForward amount }
+const computeCarryForward = async (db, allCollections, allPayments, numToFSE, isTLMap, curMonth, curYear) => {
+  const curMonthIdx = MONTHS.indexOf(curMonth);
+  if (curMonthIdx <= 0) return {}; // January or no month — no carry
+
+  const carryMap = {}; // name.toLowerCase() → total carry
+
+  for (let i = 0; i < curMonthIdx; i++) {
+    const monthName = MONTHS[i];
+    const colName   = findBTCollection(allCollections, monthName, String(curYear));
+
+    // Payments received this month per person
+    const monthReceivedMap = {};
+    allPayments.forEach(p => {
+      if (!p.createdAt) return;
+      const d = new Date(p.createdAt);
+      if (d.getFullYear() !== curYear || MONTHS[d.getMonth()] !== monthName) return;
+      const n = (p.transferTo || '').trim().toLowerCase();
+      if (n) monthReceivedMap[n] = (monthReceivedMap[n] || 0) + (p.amount || 0);
+    });
+
+    // Sent by TLs this month
+    const monthSentMap = {};
+    allPayments.forEach(p => {
+      if (!p.createdAt) return;
+      const d = new Date(p.createdAt);
+      if (d.getFullYear() !== curYear || MONTHS[d.getMonth()] !== monthName) return;
+      const sender = (p.senderName || '').trim().toLowerCase();
+      if (sender && sender !== 'admin' && sender !== 'accountant') {
+        monthSentMap[sender] = (monthSentMap[sender] || 0) + (p.amount || 0);
+      }
+    });
+
+    // BT/RP per FSE from this month's collection (via bt_master merchant → FSE mapping)
+    const monthBTMap = {}, monthRPMap = {};
+    if (colName && Object.keys(numToFSE).length > 0) {
+      const allNums = Object.keys(numToFSE);
+      const btDocs = await db.collection(colName).find(
+        { merchantNumber: { $in: allNums } },
+        { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1, lead: 1 } }
+      ).toArray();
+
+      btDocs.forEach(r => {
+        const num = (r.merchantNumber || '').trim();
+        let fseName = (numToFSE[num] || '').toLowerCase();
+        if (!fseName && r.lead) fseName = r.lead.toLowerCase().trim();
+        if (!fseName) return;
+        const s3 = parseFloat(String(r.stage3 || '0').replace(/,/g, '')) || 0;
+        monthBTMap[fseName] = (monthBTMap[fseName] || 0) + s3;
+        const rp = (r.rewardPassPro || r.priorityPassPro || '').toLowerCase();
+        if (rp === 'active') monthRPMap[fseName] = (monthRPMap[fseName] || 0) + 1;
+      });
+    }
+
+    // Compute fundLeft for each person this month and accumulate carry
+    const allNames = new Set([
+      ...Object.keys(monthReceivedMap),
+      ...Object.keys(monthBTMap)
+    ]);
+    allNames.forEach(nameLower => {
+      const received    = monthReceivedMap[nameLower] || 0;
+      if (received === 0) return; // no fund received → no carry
+      const usedBT      = monthBTMap[nameLower]  || 0;
+      const rpCount     = monthRPMap[nameLower]   || 0;
+      const usedRP      = rpCount * 2500;
+      const fee         = Math.round((usedBT > 10000 ? usedBT * 0.015 : 0) * 100) / 100;
+      const isTL        = isTLMap[nameLower] === true;
+      const sentToFSEs  = isTL ? (monthSentMap[nameLower] || 0) : 0;
+      const effectiveReceived = isTL ? Math.max(0, received - sentToFSEs) : received;
+      const monthLeft   = effectiveReceived - (usedRP + fee);
+      if (monthLeft > 0) {
+        carryMap[nameLower] = (carryMap[nameLower] || 0) + monthLeft;
+      }
+    });
+  }
+
+  return carryMap;
+};
+
 // GET /api/fund-transfer - Get all fund transfers
 router.get('/', async (req, res) => {
   try {
@@ -121,42 +226,37 @@ router.get('/usage-summary', async (req, res) => {
     // ── Load BT data from BT_TL_CONNECT {MONTH} ───────────────────────────
     // Pick collection based on selectedMonth filter — if no month selected, no BT data
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
-    const btCollections  = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
 
-    let btCollectionName = null;
-    if (selectedMonth) {
-      const monthUpper = selectedMonth.toUpperCase();
-      btCollectionName = btCollections.find(c => c.toUpperCase().includes(monthUpper)) || null;
-    }
+    // Use findBTCollection helper which also matches abbreviations (JAN, FEB etc)
+    const btCollectionName = selectedMonth
+      ? findBTCollection(allCollections, selectedMonth, selectedYear || String(new Date().getFullYear()))
+      : null;
     // If no month selected — don't fall back to latest, show ₹0
 
     const btAmountMap   = {}; // fseName → total stage3 BT done
     const rpCountMap    = {}; // fseName → count of merchants with rewardPassPro=Active
     const withdrawMap   = {}; // fseName → total withdraw amount from TideBT Form Responses
 
+    // Build numToFSE ALWAYS (needed for carry-forward even when no current month collection)
+    const masterDocsAll = await db.collection('bt_master').find(
+      {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
+    ).toArray();
+    const numToFSE = {};
+    masterDocsAll.forEach(m => {
+      const num = (m.merchantNumber || '').trim();
+      const fse = (m.fseName || '').trim();
+      if (num && fse) numToFSE[num] = fse;
+    });
+    const merchantDocsAll = await db.collection('TideBT_Merchants').find(
+      {}, { projection: { merchantNumber: 1, employeeName: 1, _id: 0 } }
+    ).toArray();
+    merchantDocsAll.forEach(m => {
+      const num = (m.merchantNumber || '').trim();
+      const fse = (m.employeeName  || '').trim();
+      if (num && fse && !numToFSE[num]) numToFSE[num] = fse;
+    });
+
     if (btCollectionName) {
-      // PRIMARY: bt_master — has all merchants with fseName mapping
-      // Only fetch fields we need
-      const masterDocs = await db.collection('bt_master').find(
-        {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
-      ).toArray();
-      const numToFSE = {};
-      masterDocs.forEach(m => {
-        const num = (m.merchantNumber || '').trim();
-        const fse = (m.fseName || '').trim();
-        if (num && fse) numToFSE[num] = fse;
-      });
-
-      // FALLBACK: also include TideBT_Merchants if bt_master doesn't cover all
-      const merchantDocs = await db.collection('TideBT_Merchants').find(
-        {}, { projection: { merchantNumber: 1, employeeName: 1, _id: 0 } }
-      ).toArray();
-      merchantDocs.forEach(m => {
-        const num = (m.merchantNumber || '').trim();
-        const fse = (m.employeeName  || '').trim();
-        if (num && fse && !numToFSE[num]) numToFSE[num] = fse;
-      });
-
       const allMerchantNums = Object.keys(numToFSE);
 
       // Get BT data from BT_TL_CONNECT — only for known merchant numbers
@@ -207,6 +307,18 @@ router.get('/usage-summary', async (req, res) => {
       sentMap[sender] = (sentMap[sender] || 0) + (p.amount || 0);
     });
 
+    // ── Compute cumulative carry-forward for months before selectedMonth ───
+    const isTLMap = {};
+    names.forEach(n => { isTLMap[n.toLowerCase()] = nameRoleMap[n] === "TL's & Managers"; });
+
+    let carryMap = {};
+    if (selectedMonth && selectedYear) {
+      carryMap = await computeCarryForward(
+        db, allCollections, allPayments, numToFSE, isTLMap,
+        selectedMonth, parseInt(selectedYear)
+      );
+    }
+
     // ── Calculate usage per person ─────────────────────────────────────────
     const summary = names.map(name => {
       const isTL      = nameRoleMap[name] === "TL's & Managers";
@@ -222,18 +334,21 @@ router.get('/usage-summary', async (req, res) => {
       const withdrawAmount = withdrawMap[name] || 0;
       const withdrawFee    = Math.round(withdrawAmount * 0.03 * 100) / 100;
 
-      const received   = receivedMap[name] || 0;
-      const sentToFSEs = isTL ? (sentMap[name] || 0) : 0;
+      const received    = receivedMap[name] || 0;
+      const sentToFSEs  = isTL ? (sentMap[name] || 0) : 0;
+      const carryFwd    = carryMap[nameLower] || 0;
 
       const totalUsed = usedRP + btFee + withdrawFee;
-      const fundLeft  = isTL
-        ? (received - sentToFSEs) - totalUsed
-        : received - totalUsed;
+      const effectiveReceived = isTL ? Math.max(0, received - sentToFSEs) : received;
+      const totalAvailable = effectiveReceived + carryFwd;
+      const fundLeft  = totalAvailable - totalUsed;
 
       return {
         name,
         type: nameRoleMap[name],
         received,
+        carryForward: carryFwd,
+        totalAvailable,
         sentToFSEs,
         usedBT,
         usedRP,
