@@ -456,6 +456,8 @@ export default function FundTransfer() {
                         <TableCell>Name</TableCell>
                         <TableCell>Type</TableCell>
                         <TableCell align="center">Received</TableCell>
+                        <TableCell align="center" sx={{ color: '#2e7d32', fontWeight: 700 }}>Carry Fwd</TableCell>
+                        <TableCell align="center" sx={{ color: '#1b5e20', fontWeight: 700 }}>Total Avail</TableCell>
                         {roleFilter !== 'fse' && <TableCell align="center">Sent to FSEs</TableCell>}
                         <TableCell align="center">Used (BT)</TableCell>
                         <TableCell align="center" sx={{ color: '#0369a1', fontWeight: 700 }}>RP#</TableCell>
@@ -477,6 +479,8 @@ export default function FundTransfer() {
                                 color: item.type === "TL's & Managers" ? '#1565c0' : '#2e7d32', fontWeight: 700, fontSize: 10 }} />
                           </TableCell>
                           <TableCell align="center" sx={{ fontWeight: 700, color: '#2e7d32' }}>₹{item.received?.toLocaleString()}</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 700, color: '#388e3c' }}>₹{(item.carryForward || 0).toLocaleString()}</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 700, color: '#1b5e20' }}>₹{(item.totalAvailable || item.received || 0).toLocaleString()}</TableCell>
                           {roleFilter !== 'fse' && (
                             <TableCell align="center" sx={{ fontWeight: 700, color: '#0d47a1' }}>
                               {item.type === "TL's & Managers"
