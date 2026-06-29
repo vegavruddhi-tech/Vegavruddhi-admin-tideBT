@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box, Typography, Card, CardContent, Button, TextField, MenuItem,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, Chip, CircularProgress, Alert, Grid, Autocomplete, Tabs, Tab
+  Chip, CircularProgress, Alert, Grid, Autocomplete, Tabs, Tab
 } from '@mui/material';
 import DateFilter from '../components/DateFilter';
 import axios from 'axios';
@@ -159,6 +159,7 @@ export default function FundTransfer() {
   }, [mobikwikForms, dateFilter, fromDate, toDate, selectedYear, selectedMonth, selectedTlFilter, selectedFseFilter, fses]);
 
   const totalMobikwikAmount = filteredMobikwik.reduce((sum, f) => sum + (f.withdrawAmount || 0), 0);
+  // eslint-disable-next-line no-unused-vars
   const totalMobikwikFees = Math.round(totalMobikwikAmount * 0.03 * 100) / 100;
 
   const filteredUsageSummary = useMemo(() => {
