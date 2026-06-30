@@ -4,8 +4,7 @@ import { BRAND } from "../theme";
 
 export default function Login() {
   const handleGoToTide = () => {
-    // Redirect to main Tide admin login
-    window.location.href = 'http://localhost:3000';
+    window.location.href = 'https://vegavruddhi-admin-panel-tq8t.vercel.app/';
   };
 
   return (
