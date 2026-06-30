@@ -27,81 +27,120 @@ const findBTCollection = (allCollections, monthName, yearStr) => {
 };
 
 // Helper: compute cumulative carry-forward per person for all months before curMonth
+// OPTIMISED: loads each unique BT collection ONCE (not once per month) then slices in memory
 // Returns a map: { personName (lowercase) → carryForward amount }
 const computeCarryForward = async (db, allCollections, allPayments, numToFSE, isTLMap, curMonth, curYear) => {
   const curMonthIdx = MONTHS.indexOf(curMonth);
-  if (curMonthIdx <= 0) return {}; // January or no month — no carry
+  if (curMonthIdx <= 0) return {}; // January — no prior months
 
-  const carryMap = {}; // name.toLowerCase() → total carry
+  const pastMonths = MONTHS.slice(0, curMonthIdx); // e.g. for June → [Jan,Feb,Mar,Apr,May]
+  const allNums    = Object.keys(numToFSE);
 
-  for (let i = 0; i < curMonthIdx; i++) {
-    const monthName = MONTHS[i];
-    const colName   = findBTCollection(allCollections, monthName, String(curYear));
+  // ── Step 1: Find unique BT collections for all past months ───────────────
+  // Multiple months can share the same collection — deduplicate to avoid repeat queries
+  const colForMonth = {}; // monthName → collectionName | null
+  const uniqueCols  = new Set();
+  pastMonths.forEach(m => {
+    const col = findBTCollection(allCollections, m, String(curYear));
+    colForMonth[m] = col;
+    if (col) uniqueCols.add(col);
+  });
 
-    // Payments received this month per person
-    const monthReceivedMap = {};
-    allPayments.forEach(p => {
-      if (!p.createdAt) return;
-      const d = new Date(p.createdAt);
-      if (d.getFullYear() !== curYear || MONTHS[d.getMonth()] !== monthName) return;
-      const n = (p.transferTo || '').trim().toLowerCase();
-      if (n) monthReceivedMap[n] = (monthReceivedMap[n] || 0) + (p.amount || 0);
-    });
-
-    // Sent by TLs this month
-    const monthSentMap = {};
-    allPayments.forEach(p => {
-      if (!p.createdAt) return;
-      const d = new Date(p.createdAt);
-      if (d.getFullYear() !== curYear || MONTHS[d.getMonth()] !== monthName) return;
-      const sender = (p.senderName || '').trim().toLowerCase();
-      if (sender && sender !== 'admin' && sender !== 'accountant') {
-        monthSentMap[sender] = (monthSentMap[sender] || 0) + (p.amount || 0);
-      }
-    });
-
-    // BT/RP per FSE from this month's collection (via bt_master merchant → FSE mapping)
-    const monthBTMap = {}, monthRPMap = {};
-    if (colName && Object.keys(numToFSE).length > 0) {
-      const allNums = Object.keys(numToFSE);
-      const btDocs = await db.collection(colName).find(
+  // ── Step 2: Load each unique collection ONCE in parallel ─────────────────
+  const colDataMap = {}; // collectionName → { [merchantNumber]: { stage3, rp } }
+  if (allNums.length > 0) {
+    await Promise.all([...uniqueCols].map(async col => {
+      const docs = await db.collection(col).find(
         { merchantNumber: { $in: allNums } },
-        { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1, lead: 1 } }
+        { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1 } }
       ).toArray();
-
-      btDocs.forEach(r => {
+      const lookup = {};
+      docs.forEach(r => {
         const num = (r.merchantNumber || '').trim();
-        let fseName = (numToFSE[num] || '').toLowerCase();
-        if (!fseName && r.lead) fseName = r.lead.toLowerCase().trim();
-        if (!fseName) return;
+        if (!num) return;
         const s3 = parseFloat(String(r.stage3 || '0').replace(/,/g, '')) || 0;
-        monthBTMap[fseName] = (monthBTMap[fseName] || 0) + s3;
-        const rp = (r.rewardPassPro || r.priorityPassPro || '').toLowerCase();
-        if (rp === 'active') monthRPMap[fseName] = (monthRPMap[fseName] || 0) + 1;
+        const rp = (r.rewardPassPro || r.priorityPassPro || '').toLowerCase() === 'active';
+        lookup[num] = { stage3: s3, rp };
       });
+      colDataMap[col] = lookup;
+    }));
+  }
+
+  // ── Step 3: Pre-slice payments by month in memory (single pass) ───────────
+  // monthPayments[monthName] = { received: {nameLower→amt}, sent: {nameLower→amt} }
+  const monthPayments = {};
+  pastMonths.forEach(m => { monthPayments[m] = { received: {}, sent: {} }; });
+
+  allPayments.forEach(p => {
+    if (!p.createdAt) return;
+    const d = new Date(p.createdAt);
+    if (d.getFullYear() !== curYear) return;
+    const monthName = MONTHS[d.getMonth()];
+    if (!monthPayments[monthName]) return;
+
+    const receiver = (p.transferTo     || '').trim().toLowerCase();
+    const sender   = (p.senderName     || '').trim().toLowerCase();
+    const whom     = (p.transferToWhom || '').trim();
+
+    // Received: only count payment matching the receiver's role type
+    // TL received = "TL's & Managers" payments, FSE received = "FSE Ground Team" payments
+    if (receiver) {
+      const isTLReceiver = isTLMap[receiver] === true;
+      if ((isTLReceiver && whom === "TL's & Managers") ||
+          (!isTLReceiver && whom === "FSE Ground Team") ||
+          !whom) {
+        monthPayments[monthName].received[receiver] = (monthPayments[monthName].received[receiver] || 0) + (p.amount || 0);
+      }
     }
 
-    // Compute fundLeft for each person this month and accumulate carry
-    const allNames = new Set([
-      ...Object.keys(monthReceivedMap),
-      ...Object.keys(monthBTMap)
-    ]);
-    allNames.forEach(nameLower => {
-      const received    = monthReceivedMap[nameLower] || 0;
-      if (received === 0) return; // no fund received → no carry
-      const usedBT      = monthBTMap[nameLower]  || 0;
-      const rpCount     = monthRPMap[nameLower]   || 0;
-      const usedRP      = rpCount * 2500;
-      const fee         = Math.round((usedBT > 10000 ? usedBT * 0.015 : 0) * 100) / 100;
-      const isTL        = isTLMap[nameLower] === true;
-      const sentToFSEs  = isTL ? (monthSentMap[nameLower] || 0) : 0;
-      const effectiveReceived = isTL ? Math.max(0, received - sentToFSEs) : received;
-      const monthLeft   = effectiveReceived - (usedRP + fee);
-      if (monthLeft > 0) {
-        carryMap[nameLower] = (carryMap[nameLower] || 0) + monthLeft;
-      }
+    // Sent: only TL outgoing to FSEs (FSE Ground Team type, not self-transfer, not VV/Admin)
+    if (sender && sender !== 'admin' && sender !== 'accountant' && sender !== 'vv' &&
+        receiver && receiver !== sender && whom === "FSE Ground Team") {
+      monthPayments[monthName].sent[sender] = (monthPayments[monthName].sent[sender] || 0) + (p.amount || 0);
+    }
+  });
+
+  // ── Step 4: Aggregate BT/RP per FSE per month from preloaded collection data ──
+  const carryMap = {};
+
+  pastMonths.forEach(monthName => {
+    const col     = colForMonth[monthName];
+    const lookup  = col ? (colDataMap[col] || {}) : {};
+
+    // Build BT/RP per fseName for this month
+    const monthBTMap = {}, monthRPMap = {};
+    allNums.forEach(num => {
+      const entry   = lookup[num];
+      if (!entry) return;
+      const fseName = (numToFSE[num] || '').toLowerCase();
+      if (!fseName) return;
+      monthBTMap[fseName] = (monthBTMap[fseName] || 0) + entry.stage3;
+      if (entry.rp) monthRPMap[fseName] = (monthRPMap[fseName] || 0) + 1;
     });
-  }
+
+    const { received: monthReceivedMap, sent: monthSentMap } = monthPayments[monthName];
+    const allNames = new Set([...Object.keys(monthReceivedMap), ...Object.keys(monthSentMap), ...Object.keys(monthBTMap)]);
+
+    allNames.forEach(nameLower => {
+      const received   = monthReceivedMap[nameLower] || 0;
+      const usedBT     = monthBTMap[nameLower] || 0;
+      const rpCount    = monthRPMap[nameLower] || 0;
+      const usedRP     = rpCount * 2500;
+      const fee        = Math.round((usedBT > 10000 ? usedBT * 0.015 : 0) * 100) / 100;
+      const isTL       = isTLMap[nameLower] === true;
+      const sentToFSEs = isTL ? (monthSentMap[nameLower] || 0) : 0;
+
+      // Net = received - sent to FSEs - BT/RP costs
+      // For TL: net = received - distributed_to_FSEs - personal_BT_costs
+      // Running balance accumulates across months (can go negative then recover)
+      const netThisMonth = received - sentToFSEs - usedRP - fee;
+      const prevBalance  = carryMap[nameLower] || 0;
+      const newBalance   = prevBalance + netThisMonth;
+
+      // Only carry positive balance — negative means TL is in "debt" which clears when they receive more
+      carryMap[nameLower] = Math.max(0, newBalance);
+    });
+  });
 
   return carryMap;
 };
@@ -187,38 +226,64 @@ router.get('/usage-summary', async (req, res) => {
 
     const accessList = await db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray();
 
-    // ── Role classification — source of truth: TideBT_Access only ────────────
+    // ── Role classification — source of truth: transferToWhom field in payments ──
     //
-    // TideBT_Access.tlName  → "TL's & Managers"
-    // TideBT_Access.fseName → "FSE Ground Team"
+    // transferToWhom = "TL's & Managers" → receiver is a TL
+    // transferToWhom = "FSE Ground Team" → receiver is an FSE
     //
-    // If a name appears in BOTH columns (edge case), fseName wins → FSE Ground Team
-    // TL rows are only added if that tlName actually received a payment
+    // If a name received BOTH types (edge case like Niteesh Kumar Saroj who is an FSE
+    // but also got TL-type payments by mistake) — FSE Ground Team wins.
+    //
+    // TideBT_Access.fseName is used as tiebreaker: if name is in fseName → always FSE.
 
     const fseNameSet = new Set(accessList.map(a => (a.fseName || '').trim()).filter(Boolean));
     const tlNameSet  = new Set(accessList.map(a => (a.tlName  || '').trim()).filter(Boolean));
 
     const nameRoleMap = {};
 
-    // All fseNames → FSE Ground Team (unconditional)
+    // Step 1: Classify from filteredPayments using transferToWhom
+    // Use TideBT_Access as PRIMARY source — transferToWhom in payments is unreliable
+    // (admins sometimes enter wrong type, self-transfers create false FSE classification)
+    // transferToWhom is only used for names NOT in TideBT_Access at all
+    filteredPayments.forEach(p => {
+      const n     = (p.transferTo    || '').trim();
+      const whom  = (p.transferToWhom || '').trim();
+      if (!n || !whom) return;
+
+      // Skip if already classified by TideBT_Access (will be set in Step 2)
+      if (fseNameSet.has(n) || tlNameSet.has(n)) return;
+
+      // For unknown names — use transferToWhom
+      if (whom === "FSE Ground Team") {
+        if (nameRoleMap[n] !== "TL's & Managers") nameRoleMap[n] = "FSE Ground Team";
+      } else if (whom === "TL's & Managers") {
+        nameRoleMap[n] = "TL's & Managers";
+      }
+    });
+
+    // Step 2: TideBT_Access is authoritative — always overrides payment-based classification
+    // fseName → FSE Ground Team (unconditional)
+    // tlName → TL's & Managers (only if NOT also an fseName)
     for (const name of fseNameSet) {
       nameRoleMap[name] = "FSE Ground Team";
     }
-
-    // tlNames → TL's & Managers
-    // BUT only if the tlName is NOT also an fseName (fseName always wins)
     for (const name of tlNameSet) {
       if (!fseNameSet.has(name)) {
         nameRoleMap[name] = "TL's & Managers";
       }
     }
 
-    // Anyone who received a payment but isn't in TideBT_Access at all
-    allPayments.forEach(p => {
-      const n = (p.transferTo || '').trim();
-      if (!n || nameRoleMap[n]) return;
-      nameRoleMap[n] = tlNameSet.has(n) ? "TL's & Managers" : "FSE Ground Team";
-    });
+    // Step 3: Remove names with no activity in selected period
+    if (isFilterActive) {
+      const filteredReceiverNames = new Set(filteredPayments.map(p => (p.transferTo || '').trim()).filter(Boolean));
+      const filteredSenderNames   = new Set(filteredPayments.map(p => (p.senderName || '').trim()).filter(Boolean));
+      Object.keys(nameRoleMap).forEach(name => {
+        // Keep if received OR sent payments in period
+        if (!filteredReceiverNames.has(name) && !filteredSenderNames.has(name)) {
+          delete nameRoleMap[name];
+        }
+      });
+    }
 
     const names = Object.keys(nameRoleMap);
     if (names.length === 0) return res.json({ success: true, summary: [], reportingPeriod });
@@ -274,8 +339,10 @@ router.get('/usage-summary', async (req, res) => {
         const stage3Raw = r.stage3 || r.Stage_3 || r['Stage-3'] || '0';
         const stage3 = parseFloat(String(stage3Raw).replace(/,/g, '')) || 0;
         const rpPro  = (r.rewardPassPro || r.Reward_Pass_Pro || r.priorityPassPro || '').toLowerCase() === 'active';
-        btAmountMap[fseName] = (btAmountMap[fseName] || 0) + stage3;
-        if (rpPro) rpCountMap[fseName] = (rpCountMap[fseName] || 0) + 1;
+        // Store with lowercase key for case-insensitive lookup
+        const key = fseName.toLowerCase();
+        btAmountMap[key] = (btAmountMap[key] || 0) + stage3;
+        if (rpPro) rpCountMap[key] = (rpCountMap[key] || 0) + 1;
       });
     }
 
@@ -285,31 +352,60 @@ router.get('/usage-summary', async (req, res) => {
       .toArray();
     withdrawData = filterByDate(withdrawData, 'createdAt');
     withdrawData.forEach(f => {
-      // Match by employeeName (exact)
-      const fseName = (f.employeeName || '').trim();
+      const fseName = (f.employeeName || '').trim().toLowerCase(); // lowercase key
       if (!fseName) return;
-      if (!withdrawMap[fseName]) withdrawMap[fseName] = 0;
-      withdrawMap[fseName] += (f.withdrawAmount || 0);
+      withdrawMap[fseName] = (withdrawMap[fseName] || 0) + (f.withdrawAmount || 0);
     });
 
-    // ── Build received map (filtered) and sent map (all-time) ─────────────
+    // ── Build received map and sent map — both from filteredPayments (month-scoped) ──
+    // receivedMap: net received per person in the filtered period
+    // For TLs: count TL's & Managers type payments (positive and negative/reversals)
+    // For FSEs: count FSE Ground Team type payments
     const receivedMap = {};
     filteredPayments.forEach(p => {
-      const n = (p.transferTo || '').trim();
-      if (!n) return;
-      receivedMap[n] = (receivedMap[n] || 0) + (p.amount || 0);
+      const n    = (p.transferTo    || '').trim();
+      const whom = (p.transferToWhom || '').trim();
+      if (!n || !whom) return;
+      const role = nameRoleMap[n];
+      if (!role) return;
+      // TL receives "TL's & Managers" payments, FSE receives "FSE Ground Team" payments
+      if ((role === "TL's & Managers" && whom === "TL's & Managers") ||
+          (role === "FSE Ground Team"  && whom === "FSE Ground Team")) {
+        receivedMap[n] = (receivedMap[n] || 0) + (p.amount || 0);
+      }
     });
 
+    // sentMap: payments sent OUT by each TL to FSEs — month-scoped
+    // Only count payments where sender is a TL and receiver ≠ sender
     const sentMap = {};
-    allPayments.forEach(p => {
-      const sender = (p.senderName || '').trim();
-      if (!sender || sender === 'Admin' || sender === 'Accountant') return;
+    filteredPayments.forEach(p => {
+      const sender   = (p.senderName  || '').trim();
+      const receiver = (p.transferTo  || '').trim();
+      const whom     = (p.transferToWhom || '').trim();
+      if (!sender || !receiver) return;
+      // Skip VV/Admin originating payments — only TL outgoing
+      if (['Admin', 'Accountant', 'VV', 'admin', 'accountant', 'vv'].includes(sender)) return;
+      // Only count FSE-type outgoing (TL distributing to FSEs)
+      if (whom !== "FSE Ground Team") return;
+      // Skip self-transfers
+      if (receiver.toLowerCase() === sender.toLowerCase()) return;
       sentMap[sender] = (sentMap[sender] || 0) + (p.amount || 0);
     });
 
+    // Also build a carryForward-aware net balance per TL using ALL payments (not just filtered)
+    // This ensures carryForward reflects the real cumulative balance across all months
+
     // ── Compute cumulative carry-forward for months before selectedMonth ───
+    // isTLMap must include ALL known TLs (from TideBT_Access), not just those active this month
     const isTLMap = {};
-    names.forEach(n => { isTLMap[n.toLowerCase()] = nameRoleMap[n] === "TL's & Managers"; });
+    // Add from TideBT_Access tlNameSet (authoritative)
+    for (const name of tlNameSet) {
+      if (!fseNameSet.has(name)) isTLMap[name.toLowerCase()] = true;
+    }
+    // Also add from current nameRoleMap
+    names.forEach(n => { 
+      if (nameRoleMap[n] === "TL's & Managers") isTLMap[n.toLowerCase()] = true; 
+    });
 
     let carryMap = {};
     if (selectedMonth && selectedYear) {
@@ -324,14 +420,14 @@ router.get('/usage-summary', async (req, res) => {
       const isTL      = nameRoleMap[name] === "TL's & Managers";
       const nameLower = name.toLowerCase().trim();
 
-      // BT amount and RP count from BT_TL_CONNECT via TideBT_Merchants
-      const usedBT  = btAmountMap[name] || 0;
-      const rpCount = rpCountMap[name]  || 0;
+      // BT amount and RP count from BT_TL_CONNECT via bt_master (case-insensitive lookup)
+      const usedBT  = btAmountMap[nameLower] || 0;
+      const rpCount = rpCountMap[nameLower]  || 0;
       const usedRP  = rpCount * 2500;
       const btFee   = Math.round((usedBT > 10000 ? usedBT * 0.015 : 0) * 100) / 100;
 
-      // Mobikwik withdrawals — matched by employeeName
-      const withdrawAmount = withdrawMap[name] || 0;
+      // Mobikwik withdrawals — case-insensitive lookup
+      const withdrawAmount = withdrawMap[nameLower] || 0;
       const withdrawFee    = Math.round(withdrawAmount * 0.03 * 100) / 100;
 
       const received    = receivedMap[name] || 0;
@@ -362,8 +458,16 @@ router.get('/usage-summary', async (req, res) => {
     });
 
     // When a filter is active, hide rows with zero activity
+    // Include if: received anything, OR sent anything, OR has carry-forward, OR has BT/RP
     const activeSummary = isFilterActive
-      ? summary.filter(item => item.received > 0 || item.usedBT > 0 || item.rpCount > 0 || item.withdrawAmount > 0)
+      ? summary.filter(item =>
+          item.received !== 0 ||
+          item.sentToFSEs > 0 ||
+          item.carryForward > 0 ||
+          item.usedBT > 0 ||
+          item.rpCount > 0 ||
+          item.withdrawAmount > 0
+        )
       : summary;
 
     res.json({ success: true, summary: activeSummary, reportingPeriod });

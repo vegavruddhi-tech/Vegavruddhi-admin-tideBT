@@ -44,6 +44,7 @@ export default function FundTransfer() {
 
   const [roleFilter, setRoleFilter] = useState('all');
   const [reportingPeriod, setReportingPeriod] = useState('');
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -64,12 +65,15 @@ export default function FundTransfer() {
     if (selectedMonth) params.set('selectedMonth', selectedMonth);
     if (dateFilter === 'custom' && fromDate) params.set('fromDate', fromDate);
     if (dateFilter === 'custom' && toDate) params.set('toDate', toDate);
+
+    setSummaryLoading(true);
     axios.get(`${API_URL}/fund-transfer/usage-summary?${params.toString()}`)
       .then(res => {
         setUsageSummary(res.data.summary || []);
         setReportingPeriod(res.data.reportingPeriod || '');
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setSummaryLoading(false));
   }, [dateFilter, selectedYear, selectedMonth, fromDate, toDate]);
 
   const fetchData = async () => {
@@ -112,10 +116,20 @@ export default function FundTransfer() {
       if (selectedYear && d.getFullYear() !== parseInt(selectedYear)) return false;
       if (selectedMonth && MONTHS[d.getMonth()] !== selectedMonth) return false;
       
-      // TL filter: match TL receiver directly OR FSE receiver who reports to that TL
+      // TL filter: show ONLY the selected TL's own received payments
+      // AND FSE-type payments to FSEs who are directly under that TL in TideBT_Access
       if (selectedTlFilter) {
-        const isReceiverTL = p.transferTo === selectedTlFilter;
-        const isReceiverFseUnderTL = fses.some(f => f.name === p.transferTo && f.reportingManager === selectedTlFilter);
+        const tlLower = selectedTlFilter.toLowerCase();
+        const isTlType = (p.transferToWhom || '').toLowerCase().includes('tl') ||
+                         (p.transferToWhom || '').toLowerCase().includes('manager');
+        // Match TL's own received fund: must be TL/Mgr type AND transferTo contains TL name
+        const isReceiverTL = isTlType && (p.transferTo || '').toLowerCase().includes(tlLower);
+        // Match FSE-type payment to FSE directly under this TL
+        const isFseType = !isTlType;
+        const isReceiverFseUnderTL = isFseType && fses.some(f => 
+          f.name === p.transferTo && 
+          (f.reportingManager || '').toLowerCase() === tlLower
+        );
         if (!isReceiverTL && !isReceiverFseUnderTL) return false;
       }
 
@@ -147,8 +161,12 @@ export default function FundTransfer() {
       
       // TL filter: match TL directly OR FSE who reports to that TL
       if (selectedTlFilter) {
-        const isFseUnderTL = fses.some(fs => fs.name === f.employeeName && fs.reportingManager === selectedTlFilter);
-        if (f.tl !== selectedTlFilter && !isFseUnderTL) return false;
+        const tlLower = selectedTlFilter.toLowerCase();
+        const isFseUnderTL = fses.some(fs => fs.name === f.employeeName && 
+          ((fs.reportingManager || '').toLowerCase().includes(tlLower)));
+        const isTlMatch = (f.tl || '').toLowerCase().includes(tlLower) || 
+                          tlLower.includes((f.tl || '').toLowerCase().split(' ')[0]);
+        if (!isTlMatch && !isFseUnderTL) return false;
       }
 
       // FSE filter
@@ -167,14 +185,21 @@ export default function FundTransfer() {
       if (roleFilter === 'tl' && item.type !== "TL's & Managers") return false;
       if (roleFilter === 'fse' && item.type !== "FSE Ground Team") return false;
       
-      // TL filter
+      // TL filter — EXACT match only (no includes/substring)
+      // "Niteesh" filter must NOT match "Niteesh Kumar Saroj"
       if (selectedTlFilter) {
-        const isTL = item.name === selectedTlFilter;
-        const isFseUnderTL = fses.some(f => f.name === item.name && f.reportingManager === selectedTlFilter);
-        if (!isTL && !isFseUnderTL) return false;
+        const tlLower = selectedTlFilter.toLowerCase().trim();
+        // TL row: exact name match
+        const isTLMatch = (item.name || '').toLowerCase().trim() === tlLower;
+        // FSE row: exact reportingManager match from TideBT_Access
+        const isFseUnderTL = fses.some(f =>
+          f.name === item.name &&
+          (f.reportingManager || '').toLowerCase().trim() === tlLower
+        );
+        if (!isTLMatch && !isFseUnderTL) return false;
       }
 
-      // FSE filter
+      // FSE filter — exact match
       if (selectedFseFilter && item.name !== selectedFseFilter) return false;
 
       return true;
@@ -385,23 +410,38 @@ export default function FundTransfer() {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {filteredPayments.map((p, i) => (
-                        <TableRow key={i} hover>
+                      {filteredPayments.map((p, i) => {
+                        const isReturn = (p.amount || 0) < 0;
+                        return (
+                        <TableRow key={i} hover sx={{ bgcolor: isReturn ? '#fff5f5' : 'inherit' }}>
                           <TableCell>{i + 1}</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>{p.senderName || '-'}</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>{p.transferTo || '-'}</TableCell>
-                          <TableCell>
-                            <Chip label={p.transferToWhom === "TL's & Managers" ? 'TL/Mgr' : 'FSE'} size="small"
-                              sx={{ bgcolor: p.transferToWhom === "TL's & Managers" ? '#e3f2fd' : '#e6f4ea',
-                                color: p.transferToWhom === "TL's & Managers" ? '#1565c0' : '#2e7d32', fontWeight: 700, fontSize: 10 }} />
+                          <TableCell sx={{ fontWeight: 600, color: isReturn ? '#c62828' : 'inherit' }}>
+                            {isReturn ? p.transferTo : p.senderName || '-'}
                           </TableCell>
-                          <TableCell sx={{ fontWeight: 700, color: '#2e7d32' }}>₹{p.amount?.toLocaleString()}</TableCell>
+                          <TableCell sx={{ fontWeight: 600, color: isReturn ? '#888' : 'inherit' }}>
+                            {isReturn ? p.senderName : p.transferTo || '-'}
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={isReturn ? 'Return' : (p.transferToWhom === "TL's & Managers" ? 'TL/Mgr' : 'FSE')}
+                              size="small"
+                              sx={{
+                                bgcolor: isReturn ? '#fdecea' : (p.transferToWhom === "TL's & Managers" ? '#e3f2fd' : '#e6f4ea'),
+                                color:   isReturn ? '#c62828' : (p.transferToWhom === "TL's & Managers" ? '#1565c0' : '#2e7d32'),
+                                fontWeight: 700, fontSize: 10
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, color: isReturn ? '#c62828' : '#2e7d32' }}>
+                            {isReturn ? '↩ ' : ''}₹{Math.abs(p.amount || 0).toLocaleString()}
+                          </TableCell>
                           <TableCell>{p.paymentDoneOn || '-'}</TableCell>
                           <TableCell sx={{ fontSize: 12 }}>
                             {p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-'}
                           </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </TableContainer>
@@ -428,16 +468,7 @@ export default function FundTransfer() {
                   onChange={(e, val) => setRoleFilter(val)}
                   sx={{
                     minHeight: 32,
-                    '& .MuiTab-root': { 
-                      py: 0.5, 
-                      px: 2, 
-                      minHeight: 32, 
-                      textTransform: 'capitalize', 
-                      fontWeight: 700, 
-                      fontSize: '0.85rem',
-                      color: '#666666',
-                      '&.Mui-selected': { color: '#1a5c38' }
-                    },
+                    '& .MuiTab-root': { py: 0.5, px: 2, minHeight: 32, textTransform: 'capitalize', fontWeight: 700, fontSize: '0.85rem', color: '#666666', '&.Mui-selected': { color: '#1a5c38' } },
                     '& .MuiTabs-indicator': { bgcolor: '#1a5c38' }
                   }}
                 >
@@ -447,61 +478,176 @@ export default function FundTransfer() {
                 </Tabs>
               </Box>
 
-              {filteredUsageSummary.length === 0 ? (
+              {summaryLoading ? (
+                <Box display="flex" justifyContent="center" alignItems="center" py={5}>
+                  <CircularProgress size={32} sx={{ color: '#1a5c38' }} />
+                  <Typography ml={2} color="text.secondary" fontSize={14}>Loading fund data...</Typography>
+                </Box>
+              ) : filteredUsageSummary.length === 0 ? (
                 <Typography color="text.secondary" textAlign="center" py={4}>No fund usage data yet</Typography>
               ) : (
-                <TableContainer>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'text.secondary' } }}>
-                        <TableCell>Name</TableCell>
-                        <TableCell>Type</TableCell>
-                        <TableCell align="center">Received</TableCell>
-                        <TableCell align="center" sx={{ color: '#2e7d32', fontWeight: 700 }}>Carry Fwd</TableCell>
-                        <TableCell align="center" sx={{ color: '#1b5e20', fontWeight: 700 }}>Total Avail</TableCell>
-                        {roleFilter !== 'fse' && <TableCell align="center">Sent to FSEs</TableCell>}
-                        <TableCell align="center">Used (BT)</TableCell>
-                        <TableCell align="center" sx={{ color: '#0369a1', fontWeight: 700 }}>RP#</TableCell>
-                        <TableCell align="center">Used (RP)</TableCell>
-                        <TableCell align="center">BT Fee</TableCell>
-                        <TableCell align="center">MK W.draw</TableCell>
-                        <TableCell align="center">MK W.Fee</TableCell>
-                        <TableCell align="center">Total Used</TableCell>
-                        <TableCell align="center">Fund Left</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {filteredUsageSummary.map((item, i) => (
-                        <TableRow key={i} hover>
-                          <TableCell sx={{ fontWeight: 600 }}>{item.name}</TableCell>
-                          <TableCell>
-                            <Chip label={item.type === "TL's & Managers" ? 'TL/Mgr' : 'FSE'} size="small"
-                              sx={{ bgcolor: item.type === "TL's & Managers" ? '#e3f2fd' : '#e6f4ea',
-                                color: item.type === "TL's & Managers" ? '#1565c0' : '#2e7d32', fontWeight: 700, fontSize: 10 }} />
-                          </TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#2e7d32' }}>₹{item.received?.toLocaleString()}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#388e3c' }}>₹{(item.carryForward || 0).toLocaleString()}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#1b5e20' }}>₹{(item.totalAvailable || item.received || 0).toLocaleString()}</TableCell>
-                          {roleFilter !== 'fse' && (
-                            <TableCell align="center" sx={{ fontWeight: 700, color: '#0d47a1' }}>
-                              {item.type === "TL's & Managers"
-                                ? `₹${(item.sentToFSEs || 0).toLocaleString()}`
-                                : <span style={{ color: '#bdbdbd' }}>—</span>}
-                            </TableCell>
-                          )}
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#e65100' }}>₹{item.usedBT?.toLocaleString()}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#0369a1' }}>{item.rpCount || 0}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#7c3aed' }}>₹{item.usedRP?.toLocaleString()}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#c62828' }}>₹{item.btFee?.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#4338ca' }}>₹{item.withdrawAmount?.toLocaleString()}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#880e4f' }}>₹{item.withdrawFee?.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: '#ff6f00' }}>₹{item.totalUsed?.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: item.fundLeft >= 0 ? '#1565c0' : '#c62828' }}>₹{item.fundLeft?.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
+                <Box>
+                  {/* ── TL Fund Flow Cards ── */}
+                  {filteredUsageSummary.filter(item => item.type === "TL's & Managers").length > 0 && roleFilter !== 'fse' && (
+                    <Box mb={3}>
+                      <Typography variant="subtitle2" fontWeight={700} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, mb: 1.5, fontSize: 11 }}>
+                        🏦 TL's & Managers — Fund Flow
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {filteredUsageSummary.filter(item => item.type === "TL's & Managers").map((item, i) => {
+                          const selfKept = Math.max(0, item.received - (item.sentToFSEs || 0));
+                          const fundLeft = item.fundLeft || 0;
+                          const totalAvail = item.totalAvailable || selfKept;
+                          return (
+                            <Box key={i} sx={{ border: '1.5px solid #c8e6c9', borderRadius: 2, overflow: 'hidden' }}>
+                              {/* Header */}
+                              <Box sx={{ background: 'linear-gradient(135deg, #1a5c38 0%, #2d7a4f 100%)', px: 2.5, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <Box display="flex" alignItems="center" gap={1}>
+                                  <Box sx={{ width: 34, height: 34, borderRadius: '50%', bgcolor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: '#fff', fontSize: 14 }}>
+                                    {item.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                                  </Box>
+                                  <Box>
+                                    <Typography fontWeight={700} color="#fff" fontSize={15}>{item.name}</Typography>
+                                    <Typography fontSize={11} sx={{ color: 'rgba(255,255,255,0.75)' }}>Team Lead · {selectedMonth} {selectedYear}</Typography>
+                                  </Box>
+                                </Box>
+                                <Chip
+                                  label={fundLeft >= 0 ? `₹${fundLeft.toLocaleString(undefined, {maximumFractionDigits:0})} Left` : `₹${Math.abs(fundLeft).toLocaleString(undefined, {maximumFractionDigits:0})} Overdrawn`}
+                                  sx={{ bgcolor: fundLeft >= 0 ? '#e3f2fd' : '#ffebee', color: fundLeft >= 0 ? '#1565c0' : '#c62828', fontWeight: 800, fontSize: 13 }}
+                                />
+                              </Box>
+
+                              {/* Fund Flow Row */}
+                              <Box sx={{ px: 2.5, py: 2, background: '#f8fdf9' }}>
+
+                                {/* Row 1: This month activity */}
+                                <Typography fontSize={9} fontWeight={700} color="text.secondary" textTransform="uppercase" letterSpacing={1} mb={0.75}>
+                                  📅 This Month ({selectedMonth} {selectedYear})
+                                </Typography>
+                                <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0, mb: 2, flexWrap: 'wrap' }}>
+                                  <Box sx={{ flex: 1, minWidth: 110, background: item.received < 0 ? '#fdecea' : '#e8f5e9', borderRadius: '10px 0 0 10px', px: 2, py: 1.5, borderRight: '2px dashed #a5d6a7' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">
+                                      {item.received < 0 ? 'Returned to Admin' : 'Received from VV'}
+                                    </Typography>
+                                    <Typography fontSize={18} fontWeight={800} color={item.received < 0 ? '#c62828' : '#2e7d32'}>₹{item.received.toLocaleString()}</Typography>
+                                    {item.received < 0 && <Typography fontSize={8} sx={{ color: '#c62828', mt: 0.5 }}>Net return this month</Typography>}
+                                  </Box>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, color: '#aaa', fontSize: 18 }}>→</Box>
+                                  <Box sx={{ flex: 1, minWidth: 110, background: '#e3f2fd', px: 2, py: 1.5, borderRight: '2px dashed #90caf9' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Distributed to FSEs</Typography>
+                                    <Typography fontSize={18} fontWeight={800} color="#1565c0">₹{(item.sentToFSEs || 0).toLocaleString()}</Typography>
+                                  </Box>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, color: '#aaa', fontSize: 18 }}>→</Box>
+                                  <Box sx={{ flex: 1, minWidth: 110, background: '#fff8e1', borderRadius: '0 10px 10px 0', px: 2, py: 1.5 }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Kept for Self</Typography>
+                                    <Typography fontSize={18} fontWeight={800} color="#f57f17">₹{selfKept.toLocaleString()}</Typography>
+                                    <Typography fontSize={8} color="text.secondary">Received − Distributed</Typography>
+                                  </Box>
+                                </Box>
+
+                                {/* Row 2: Personal fund breakdown */}
+                                <Typography fontSize={9} fontWeight={700} color="text.secondary" textTransform="uppercase" letterSpacing={1} mb={0.75}>
+                                  💰 Personal Fund (Kept for Self)
+                                </Typography>
+                                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 1 }}>
+                                  <Box sx={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Self Kept</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color="#f57f17">₹{selfKept.toLocaleString()}</Typography>
+                                  </Box>
+                                  <Box sx={{ background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">+ Carry Fwd</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color="#388e3c">₹{(item.carryForward || 0).toLocaleString()}</Typography>
+                                    <Typography fontSize={8} color="text.secondary">From prev months</Typography>
+                                  </Box>
+                                  <Box sx={{ background: '#f1f8e9', border: '1.5px solid #66bb6a', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">= Available</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color="#1b5e20">₹{totalAvail.toLocaleString()}</Typography>
+                                  </Box>
+                                  <Box sx={{ background: '#fff3e0', border: '1px solid #ffcc80', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">BT Done</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color="#e65100">₹{(item.usedBT || 0).toLocaleString()}</Typography>
+                                  </Box>
+                                  <Box sx={{ background: '#ede9fe', border: '1px solid #ce93d8', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">RP ({item.rpCount || 0}×₹2.5k)</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color="#7c3aed">₹{(item.usedRP || 0).toLocaleString()}</Typography>
+                                  </Box>
+                                  <Box sx={{ background: '#fce4ec', border: '1px solid #f48fb1', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">BT Fee 1.5%</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color="#c62828">₹{(item.btFee || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</Typography>
+                                  </Box>
+                                  {item.withdrawAmount > 0 && (
+                                    <Box sx={{ background: '#f3e8ff', border: '1px solid #d8b4fe', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                      <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">MobiKwik</Typography>
+                                      <Typography fontSize={13} fontWeight={800} color="#4338ca">₹{item.withdrawAmount.toLocaleString()}</Typography>
+                                    </Box>
+                                  )}
+                                  <Box sx={{ background: '#fff8e1', border: '1.5px solid #ffa726', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Total Used</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color="#ff6f00">₹{(item.totalUsed || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</Typography>
+                                  </Box>
+                                  <Box sx={{ background: fundLeft >= 0 ? '#e3f2fd' : '#ffebee', border: `1.5px solid ${fundLeft >= 0 ? '#1565c0' : '#c62828'}`, borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Fund Left</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color={fundLeft >= 0 ? '#1565c0' : '#c62828'}>
+                                      ₹{Math.abs(fundLeft).toLocaleString(undefined, {maximumFractionDigits: 0})}
+                                    </Typography>
+                                    <Typography fontSize={8} color="text.secondary">{fundLeft >= 0 ? 'Available' : 'Overdrawn'}</Typography>
+                                  </Box>
+                                </Box>
+                              </Box>
+                            </Box>
+                          );
+                        })}
+                      </Box>
+                    </Box>
+                  )}
+
+                  {/* ── FSE Table ── */}
+                  {filteredUsageSummary.filter(item => item.type === "FSE Ground Team").length > 0 && roleFilter !== 'tl' && (
+                    <Box>
+                      <Typography variant="subtitle2" fontWeight={700} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, mb: 1.5, fontSize: 11 }}>
+                        👥 FSE Ground Team
+                      </Typography>
+                      <TableContainer>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'text.secondary', bgcolor: '#f8fdf9' } }}>
+                              <TableCell>Name</TableCell>
+                              <TableCell align="center">Received</TableCell>
+                              <TableCell align="center" sx={{ color: '#2e7d32' }}>Carry Fwd</TableCell>
+                              <TableCell align="center" sx={{ color: '#1b5e20' }}>Total Avail</TableCell>
+                              <TableCell align="center">BT Done</TableCell>
+                              <TableCell align="center">RP #</TableCell>
+                              <TableCell align="center">RP Cost</TableCell>
+                              <TableCell align="center">BT Fee</TableCell>
+                              <TableCell align="center">MK W.</TableCell>
+                              <TableCell align="center">Total Used</TableCell>
+                              <TableCell align="center">Fund Left</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {filteredUsageSummary.filter(item => item.type === "FSE Ground Team").map((item, i) => (
+                              <TableRow key={i} hover>
+                                <TableCell sx={{ fontWeight: 600 }}>{item.name}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#2e7d32' }}>₹{item.received?.toLocaleString()}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#388e3c' }}>₹{(item.carryForward || 0).toLocaleString()}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#1b5e20' }}>₹{(item.totalAvailable || 0).toLocaleString()}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#e65100' }}>₹{(item.usedBT || 0).toLocaleString()}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#0369a1' }}>{item.rpCount || 0}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#7c3aed' }}>₹{(item.usedRP || 0).toLocaleString()}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#c62828' }}>₹{(item.btFee || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#4338ca' }}>₹{(item.withdrawAmount || 0).toLocaleString()}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#ff6f00' }}>₹{(item.totalUsed || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: (item.fundLeft || 0) >= 0 ? '#1565c0' : '#c62828' }}>
+                                  ₹{(item.fundLeft || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Box>
+                  )}
+                </Box>
               )}
             </CardContent>
           </Card>
