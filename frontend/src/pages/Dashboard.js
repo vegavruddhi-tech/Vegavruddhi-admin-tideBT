@@ -560,8 +560,8 @@ export default function Dashboard() {
 
   // Business Performance KPIs
   const performanceKpis = useMemo(() => {
-    // 1. Total BT Completed (Stage 3 + UPI Amount)
-    const totalBtCompleted = merchantsData.reduce((sum, m) => sum + (m.stage3 || 0) + (m.upiAmount || 0), 0);
+    // 1. Total BT Completed — Stage-3 only (upiAmount is QR load, not BT)
+    const totalBtCompleted = merchantsData.reduce((sum, m) => sum + (m.stage3 || 0), 0);
 
     // 2. Total RP Purchased
     const filteredRP = rewardPassData.filter(rp => {
@@ -844,8 +844,8 @@ export default function Dashboard() {
     setDialogType(type);
 
     if (type === 'kpi-bt-completed') {
-      setDialogTitle('Total BT Completed (Stage 3 + UPI Amount)');
-      setDialogData(merchantsData.filter(m => (m.stage3 || 0) > 0 || (m.upiAmount || 0) > 0));
+      setDialogTitle('Total BT Completed (Stage 3)');
+      setDialogData(merchantsData.filter(m => (m.stage3 || 0) > 0));
     } else if (type === 'kpi-rp-purchased') {
       setDialogTitle('Total RP Purchased');
       // Build FSE claims map
