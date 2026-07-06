@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { cacheGet, cacheSet, cacheKey } = require('../utils/cache');
+const { cacheGet, cacheSet, cacheKey, cacheInvalidate } = require('../utils/cache');
 
 // GET /api/fse - Get all FSEs with Tide BT access
 router.get('/', async (req, res) => {
@@ -153,7 +153,7 @@ router.get('/merchants/all', async (req, res) => {
     }).filter(d => d.metrics.total > 0);
 
     const result = { success: true, data, btCollection: btCollectionName, collectionMonth };
-    await cacheSet(ck, result, 600); // cache 10 min
+    await cacheSet(ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE merchants summary error:', err.message);
@@ -269,7 +269,7 @@ router.get('/merchants/all-details', async (req, res) => {
       merchantCategory: m.merchantCategory
     }));
     const result = { success: true, merchants, btCollection: btCollectionName };
-    await cacheSet(ck, result, 600);
+    await cacheSet(ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE all-details error:', err.message);
@@ -386,7 +386,7 @@ router.get('/merchants/:fseName', async (req, res) => {
     });
 
     const result = { success: true, merchants };
-    await cacheSet(ck, result, 600); // cache 10 min
+    await cacheSet(ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE merchants detail error:', err.message);
@@ -433,6 +433,17 @@ router.get('/:name', async (req, res) => {
   } catch (error) {
     console.error('Error fetching FSE details:', error);
     res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/fse/cache/bust — manually clear all FSE overview caches
+// Call this after running sync scripts that update bt_master or BT_TL_CONNECT
+router.post('/cache/bust', async (req, res) => {
+  try {
+    await cacheInvalidate('*');
+    res.json({ success: true, message: 'All FSE/TL overview caches cleared' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

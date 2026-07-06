@@ -4,6 +4,50 @@ const router = express.Router();
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
                 'July', 'August', 'September', 'October', 'November', 'December'];
 
+// ── Permanent Cache (invalidate-on-write) ──────────────────────────────────
+// Cache lives forever. Cleared only when a payment is added/updated/deleted.
+// Past months (e.g. June when current month is July) are cached once and never expire.
+// Current month cache is cleared every time a new payment is posted.
+const CACHE_COLLECTION = 'TideBT_SummaryCache';
+
+const getCacheKey = (query) => {
+  const { selectedYear, selectedMonth, dateFilter, fromDate, toDate } = query;
+  return `usage:${selectedMonth || 'all'}:${selectedYear || 'all'}:${dateFilter || 'all'}:${fromDate || ''}:${toDate || ''}`;
+};
+
+const readCache = async (db, cacheKey) => {
+  try {
+    const doc = await db.collection(CACHE_COLLECTION).findOne({ cacheKey });
+    return doc ? doc.data : null;
+  } catch (e) {
+    console.warn('⚠️ Cache read failed (non-fatal):', e.message);
+    return null;
+  }
+};
+
+const writeCache = async (db, cacheKey, data) => {
+  try {
+    await db.collection(CACHE_COLLECTION).updateOne(
+      { cacheKey },
+      { $set: { cacheKey, data, updatedAt: new Date() } },
+      { upsert: true }
+    );
+    console.log('💾 Cache written:', cacheKey);
+  } catch (e) {
+    console.warn('⚠️ Cache write failed (non-fatal):', e.message);
+  }
+};
+
+const bustCache = async (db) => {
+  try {
+    const result = await db.collection(CACHE_COLLECTION).deleteMany({});
+    console.log(`🗑️ Cache busted — ${result.deletedCount} entries cleared`);
+  } catch (e) {
+    console.warn('⚠️ Cache bust failed (non-fatal):', e.message);
+  }
+};
+// ──────────────────────────────────────────────────────────────────────────
+
 const MONTH_ABBR = {
   'JANUARY': 'JAN', 'FEBRUARY': 'FEB', 'MARCH': 'MAR', 'APRIL': 'APR',
   'MAY': 'MAY', 'JUNE': 'JUN', 'JULY': 'JUL', 'AUGUST': 'AUG',
@@ -166,6 +210,16 @@ router.get('/usage-summary', async (req, res) => {
   try {
     const db = req.db;
     const { selectedYear, selectedMonth, dateFilter, fromDate, toDate } = req.query;
+
+    // ── Cache check — return instantly if already computed ─────────────────
+    const cacheKey = getCacheKey(req.query);
+    const cached = await readCache(db, cacheKey);
+    if (cached) {
+      console.log('⚡ Cache HIT:', cacheKey);
+      return res.json({ ...cached, fromCache: true });
+    }
+    console.log('🔄 Cache MISS — computing:', cacheKey);
+    // ──────────────────────────────────────────────────────────────────────
 
     const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
                     'July', 'August', 'September', 'October', 'November', 'December'];
@@ -470,7 +524,11 @@ router.get('/usage-summary', async (req, res) => {
         )
       : summary;
 
-    res.json({ success: true, summary: activeSummary, reportingPeriod });
+    // ── Save to cache before responding ───────────────────────────────────
+    const result = { success: true, summary: activeSummary, reportingPeriod };
+    await writeCache(db, cacheKey, result);
+
+    res.json(result);
   } catch (error) {
     console.error('Error fetching usage summary:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -500,6 +558,9 @@ router.post('/', async (req, res) => {
 
     const result = await db.collection('TideBT_Payments').insertOne(payment);
     console.log('✅ Payment saved:', result.insertedId);
+
+    // ── New payment → all cached summaries are stale, clear them ──────────
+    await bustCache(db);
 
     res.json({ success: true, message: 'Payment recorded successfully', payment });
   } catch (error) {

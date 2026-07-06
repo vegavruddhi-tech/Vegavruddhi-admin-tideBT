@@ -107,7 +107,7 @@ router.get('/:name', async (req, res) => {
   }
 });
 
-const { cacheGet, cacheSet, cacheKey } = require('../utils/cache');
+const { cacheGet, cacheSet, cacheKey, cacheInvalidate } = require('../utils/cache');
 
 // Helper: find BT_TL_CONNECT collection for month/year
 async function findBTCollection(db, selectedMonth, selectedYear) {
@@ -171,7 +171,7 @@ router.get('/:tlName/own-merchants', async (req, res) => {
 
     if (masterDocs.length === 0) {
       const r = { success: true, merchants: [] };
-      await cacheSet(ck, r, 600);
+      await cacheSet(ck, r, 0); // permanent
       return res.json(r);
     }
 
@@ -206,7 +206,7 @@ router.get('/:tlName/own-merchants', async (req, res) => {
 
     const merchants = Object.values(merchantMap).sort((a,b) => (b.stage3||0)-(a.stage3||0));
     const result = { success: true, merchants };
-    await cacheSet(ck, result, 600);
+    await cacheSet(ck, result, 0); // permanent — busted on sync/write
     res.json(result);
   } catch (err) {
     console.error('TL own-merchants error:', err.message);
@@ -244,7 +244,7 @@ router.get('/:tlName/team-merchants', async (req, res) => {
 
     if (fseNames.length === 0) {
       const r = { success: true, merchants: [] };
-      await cacheSet(ck, r, 600);
+      await cacheSet(ck, r, 0); // permanent
       return res.json(r);
     }
 
@@ -285,10 +285,21 @@ router.get('/:tlName/team-merchants', async (req, res) => {
 
     const merchants = Object.values(merchantMap).sort((a,b) => (b.stage3||0)-(a.stage3||0));
     const result = { success: true, merchants };
-    await cacheSet(ck, result, 600);
+    await cacheSet(ck, result, 0); // permanent — busted on sync/write
     res.json(result);
   } catch (err) {
     console.error('TL team-merchants error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/tl/cache/bust — manually clear all TL/FSE overview caches
+// Call this after running any sync script that updates bt_master or BT_TL_CONNECT
+router.post('/cache/bust', async (req, res) => {
+  try {
+    await cacheInvalidate('*');
+    res.json({ success: true, message: 'All overview caches cleared' });
+  } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
