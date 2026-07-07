@@ -495,12 +495,34 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchMerchants = async () => {
       setMerchantsLoading(true);
+      const lsKey = `admin_all_details_${selectedMonth || 'all'}_${selectedYear || 'all'}`;
+      // Show cached instantly
+      const stored = localStorage.getItem(lsKey);
+      if (stored) {
+        try {
+          setMerchantsData(JSON.parse(stored));
+          setMerchantsLoading(false);
+          // Refresh in background
+          const params = new URLSearchParams();
+          if (selectedMonth) params.set('selectedMonth', selectedMonth);
+          if (selectedYear) params.set('selectedYear', selectedYear);
+          axios.get(`${API_URL}/fse/merchants/all-details?${params}`)
+            .then(res => {
+              const m = res.data.merchants || [];
+              setMerchantsData(m);
+              localStorage.setItem(lsKey, JSON.stringify(m));
+            }).catch(() => {});
+          return;
+        } catch {}
+      }
       try {
         const params = new URLSearchParams();
         if (selectedMonth) params.set('selectedMonth', selectedMonth);
         if (selectedYear) params.set('selectedYear', selectedYear);
         const res = await axios.get(`${API_URL}/fse/merchants/all-details?${params}`);
-        setMerchantsData(res.data.merchants || []);
+        const m = res.data.merchants || [];
+        setMerchantsData(m);
+        localStorage.setItem(lsKey, JSON.stringify(m));
       } catch (err) {
         console.error('Error fetching merchants for dashboard:', err);
       } finally {

@@ -314,12 +314,38 @@ export default function FSEOverview() {
   const loadAllFSEMerchants = useCallback(async () => {
     if (allMerchantsData.length > 0) return; // already loaded
     setAllMerchantsLoading(true);
+
+    // ── Show localStorage cached data instantly ──────────────────────────
+    const lsKey = `fse_all_details_${selectedMonth || 'all'}_${selectedYear || 'all'}`;
+    const stored = localStorage.getItem(lsKey);
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setAllMerchantsData(parsed);
+        setAllMerchantsLoading(false);
+        // Still refresh in background silently
+        const params = new URLSearchParams();
+        if (selectedMonth) params.set('selectedMonth', selectedMonth);
+        if (selectedYear) params.set('selectedYear', selectedYear);
+        axios.get(`${API_URL}/fse/merchants/all-details?${params}`)
+          .then(res => {
+            const merchants = res.data.merchants || [];
+            setAllMerchantsData(merchants);
+            localStorage.setItem(lsKey, JSON.stringify(merchants));
+          }).catch(() => {});
+        return;
+      } catch {}
+    }
+    // ────────────────────────────────────────────────────────────────────
+
     try {
       const params = new URLSearchParams();
       if (selectedMonth) params.set('selectedMonth', selectedMonth);
       if (selectedYear) params.set('selectedYear', selectedYear);
       const res = await axios.get(`${API_URL}/fse/merchants/all-details?${params}`);
-      setAllMerchantsData(res.data.merchants || []);
+      const merchants = res.data.merchants || [];
+      setAllMerchantsData(merchants);
+      localStorage.setItem(lsKey, JSON.stringify(merchants));
     } catch (err) {
       console.error('Error fetching all merchants:', err);
     } finally {
