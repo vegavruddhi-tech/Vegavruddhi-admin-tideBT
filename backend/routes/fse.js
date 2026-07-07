@@ -55,7 +55,7 @@ router.get('/merchants/all', async (req, res) => {
 
     // Cache check
     const ck = cacheKey('FSE_MERCHANTS_ALL', selectedMonth, selectedYear);
-    const cached = await cacheGet(ck);
+    const cached = await cacheGet(db, ck);
     if (cached) {
       console.log(`[Cache HIT] ${ck}`);
       return res.json(cached);
@@ -153,7 +153,7 @@ router.get('/merchants/all', async (req, res) => {
     }).filter(d => d.metrics.total > 0);
 
     const result = { success: true, data, btCollection: btCollectionName, collectionMonth };
-    await cacheSet(ck, result, 0); // permanent — busted on write
+    await cacheSet(db, ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE merchants summary error:', err.message);
@@ -170,7 +170,7 @@ router.get('/merchants/all-details', async (req, res) => {
 
     // Cache check
     const ck = cacheKey('FSE_ALL_DETAILS', selectedMonth, selectedYear);
-    const cached = await cacheGet(ck);
+    const cached = await cacheGet(db, ck);
     if (cached) {
       console.log(`[Cache HIT] ${ck}`);
       return res.json(cached);
@@ -269,7 +269,7 @@ router.get('/merchants/all-details', async (req, res) => {
       merchantCategory: m.merchantCategory
     }));
     const result = { success: true, merchants, btCollection: btCollectionName };
-    await cacheSet(ck, result, 0); // permanent — busted on write
+    await cacheSet(db, ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE all-details error:', err.message);
@@ -287,7 +287,7 @@ router.get('/merchants/:fseName', async (req, res) => {
 
     // Cache check — per FSE per month
     const ck = cacheKey('FSE_MERCHANTS', fseName, selectedMonth, selectedYear);
-    const cached = await cacheGet(ck);
+    const cached = await cacheGet(db, ck);
     if (cached) {
       console.log(`[Cache HIT] ${ck}`);
       return res.json(cached);
@@ -386,7 +386,7 @@ router.get('/merchants/:fseName', async (req, res) => {
     });
 
     const result = { success: true, merchants };
-    await cacheSet(ck, result, 0); // permanent — busted on write
+    await cacheSet(db, ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE merchants detail error:', err.message);
@@ -440,7 +440,8 @@ router.get('/:name', async (req, res) => {
 // Call this after running sync scripts that update bt_master or BT_TL_CONNECT
 router.post('/cache/bust', async (req, res) => {
   try {
-    await cacheInvalidate('*');
+    const db = req.db;
+    await cacheInvalidate(db, '*');
     res.json({ success: true, message: 'All FSE/TL overview caches cleared' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
