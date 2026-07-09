@@ -10,6 +10,7 @@ import TLPerformance from "./pages/TLPerformance"; // eslint-disable-line no-unu
 import FSEPerformance from "./pages/FSEPerformance"; // eslint-disable-line no-unused-vars
 import FinanceReport from "./pages/FinanceReport"; // eslint-disable-line no-unused-vars
 import SetTargets from "./pages/SetTargets";
+import Attendance from "./pages/Attendance";
 import Login from "./pages/Login";
 
 import { ThemeProvider, createTheme, useTheme } from "@mui/material/styles";
@@ -44,6 +45,7 @@ const NAV_ITEMS = [
   { value: "set-targets",     label: "Set Targets" },
   { value: "fund-transfer",   label: "Fund Transfer" },
   { value: "mobikwik-forms",  label: "Mobikwik Forms" },
+  { value: "attendance",      label: "Attendance" },
 ];
 
 // ── Responsive Navbar inner component (needs theme/breakpoints) ──
@@ -493,7 +495,8 @@ function App() {
              page === "set-targets"   ? <SetTargets /> :
              page === "fund-transfer" ? <FundTransfer /> :
              page === "bt-forms"      ? <BTForms /> :
-             page === "mobikwik-forms" ? <MobikwikForms /> : null}
+             page === "mobikwik-forms" ? <MobikwikForms /> :
+             page === "attendance"    ? <Attendance /> : null}
           </Box>
         </>
       )}

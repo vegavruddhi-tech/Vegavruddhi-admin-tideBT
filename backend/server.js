@@ -72,6 +72,7 @@ app.use('/api/forms', require('./routes/forms'));
 app.use('/api/fund-transfer', require('./routes/fundTransfer'));
 app.use('/api/rp-audit', require('./routes/rpAudit'));
 app.use('/api/targets', require('./routes/targets'));
+app.use('/api/attendance', require('./routes/attendance'));
 
 // Health check
 app.get('/health', async (req, res) => {
