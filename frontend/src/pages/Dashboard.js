@@ -588,9 +588,10 @@ export default function Dashboard() {
     // 7. Total Merchants
     const totalMerchants = merchantsData.length;
 
-    // 8. Total Active FSEs (unique FSEs active in merchantsData)
-    const uniqueFses = new Set(merchantsData.map(m => m.fseName?.trim()).filter(Boolean));
-    const totalActiveFses = uniqueFses.size;
+    // 8. Total Active FSEs — from TideBT_Access (authoritative count)
+    // merchantsData has 279 unique fseName values (historical bt_master entries)
+    // but only 58 FSEs are currently active in TideBT_Access
+    const totalActiveFses = fses.length;
 
     return {
       totalBtCompleted,
@@ -602,7 +603,7 @@ export default function Dashboard() {
       totalMerchants,
       totalActiveFses
     };
-  }, [merchantsData, rewardPassData, selectedMonth, selectedYear]);
+  }, [merchantsData, rewardPassData, selectedMonth, selectedYear, fses]);
 
   // Chart 1: Top FSEs by Reward Pass Activation (replaces Forms per FSE)
   const rpPerFSE = useMemo(() => {
@@ -907,15 +908,27 @@ export default function Dashboard() {
   const renderDialogContent = () => {
     if (dialogLoading) return <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>;
 
+    // Limit dialog data to first 300 for performance — large datasets freeze the UI
+    const MAX_DIALOG_ROWS = 300;
+    const displayData = dialogData.length > MAX_DIALOG_ROWS ? dialogData.slice(0, MAX_DIALOG_ROWS) : dialogData;
+    const isTruncated = dialogData.length > MAX_DIALOG_ROWS;
+
     if (['kpi-bt-completed', 'kpi-rp-purchased', 'kpi-rp-active', 'kpi-rp-pending', 'kpi-pass-live', 'kpi-pending-bt', 'kpi-total-merchants', 'kpi-active-fse'].includes(dialogType)) {
       return (
-        <KpiDrillContent 
-          kpiDrillData={dialogData} 
-          kpiType={dialogType} 
-          rewardPassData={rewardPassData} 
-          selectedMonth={selectedMonth} 
-          selectedYear={selectedYear} 
-        />
+        <>
+          {isTruncated && (
+            <Box sx={{ px: 2, py: 1, bgcolor: '#fff3e0', borderRadius: 1, mb: 1, fontSize: 12, color: '#e65100' }}>
+              Showing top {MAX_DIALOG_ROWS} of {dialogData.length} records
+            </Box>
+          )}
+          <KpiDrillContent 
+            kpiDrillData={displayData} 
+            kpiType={dialogType} 
+            rewardPassData={rewardPassData} 
+            selectedMonth={selectedMonth} 
+            selectedYear={selectedYear} 
+          />
+        </>
       );
     }
 
@@ -1017,6 +1030,11 @@ export default function Dashboard() {
     if (dialogType === 'bt-merchants') {
       return (
         <TableContainer component={Paper} variant="outlined">
+          {dialogData.length > MAX_DIALOG_ROWS && (
+            <Box sx={{ px: 2, py: 1, bgcolor: '#fff3e0', fontSize: 12, color: '#e65100' }}>
+              Showing top {MAX_DIALOG_ROWS} of {dialogData.length} records
+            </Box>
+          )}
           <Table size="small">
             <TableHead><TableRow sx={{ bgcolor: 'action.hover' }}>
               <TableCell sx={{ fontWeight: 700 }}>#</TableCell>
@@ -1030,7 +1048,7 @@ export default function Dashboard() {
               <TableCell sx={{ fontWeight: 700 }}>Pass Live</TableCell>
             </TableRow></TableHead>
             <TableBody>
-              {dialogData.map((m, i) => {
+              {displayData.map((m, i) => {
                 const rpActive = (m.rewardPassPro || '').toLowerCase() === 'active';
                 const passLive = (m.passLive || '').toLowerCase() === 'live';
                 return (
