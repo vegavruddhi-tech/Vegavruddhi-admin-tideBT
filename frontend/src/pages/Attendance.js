@@ -18,8 +18,8 @@ import RepeatIcon from '@mui/icons-material/Repeat';
 import CloseIcon from '@mui/icons-material/Close';
 import RefreshIcon from '@mui/icons-material/Refresh';
 
-// Employee panel backend — same source as the normal admin panel
-const EMP_BASE = process.env.REACT_APP_EMPLOYEE_API_URL || 'http://localhost:4000/api';
+// TideBT Admin backend — filters attendance to only TideBT FSEs/TLs from TideBT_Access
+const EMP_BASE = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
 export default function Attendance() {
   const [allRecords, setAllRecords]     = useState([]);
@@ -50,13 +50,13 @@ export default function Attendance() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${EMP_BASE}/attendance/admin/full?date=${selectedDate}`);
+      const res = await fetch(`${EMP_BASE}/attendance/admin/all?date=${selectedDate}`);
       if (!res.ok && res.status !== 304) throw new Error('Failed to fetch attendance');
       const data = await res.json();
-      setAllRecords(data);
+      setAllRecords(data.attendance || data || []);
     } catch (err) {
       console.error(err);
-      setError('Failed to load attendance data. Check employee backend connection.');
+      setError('Failed to load attendance data. Check TideBT admin backend connection.');
     } finally {
       setLoading(false);
     }
