@@ -486,6 +486,16 @@ router.get('/usage-summary', async (req, res) => {
         db, allCollections, allPayments, numToFSE, isTLMap,
         selectedMonth, parseInt(selectedYear)
       );
+      // ── Only keep carry-forward for ACTIVE members in TideBT_Access ─────
+      // People who left or are no longer active should NOT show pending carry-forward.
+      // Their pending balance is considered settled when they exit.
+      const activeNames = new Set([
+        ...[...fseNameSet].map(n => n.toLowerCase()),
+        ...[...tlNameSet].map(n => n.toLowerCase())
+      ]);
+      Object.keys(carryMap).forEach(k => {
+        if (!activeNames.has(k)) delete carryMap[k];
+      });
     }
 
     // ── Calculate usage per person ─────────────────────────────────────────
