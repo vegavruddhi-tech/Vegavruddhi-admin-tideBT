@@ -478,6 +478,60 @@ export default function FundTransfer() {
                 </Tabs>
               </Box>
 
+              {/* ── Carry Forward Alert Section ── */}
+              {(() => {
+                const withCarry = usageSummary.filter(item => (item.carryForward || 0) > 0);
+                if (withCarry.length === 0) return null;
+                const totalCarry = withCarry.reduce((s, item) => s + (item.carryForward || 0), 0);
+                return (
+                  <Box sx={{ mb: 2.5, p: 2, bgcolor: '#fff8e1', border: '1.5px solid #ffd54f', borderRadius: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+                      <Typography fontWeight={800} fontSize={13} color="#e65100">
+                        🔄 Carry Forward from Previous Month(s)
+                      </Typography>
+                      <Chip
+                        label={`Total Pending: ₹${totalCarry.toLocaleString()}`}
+                        size="small"
+                        sx={{ bgcolor: '#ff9800', color: '#fff', fontWeight: 800, fontSize: 11 }}
+                      />
+                    </Box>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {withCarry.map((item, i) => (
+                        <Box key={i} sx={{
+                          display: 'flex', alignItems: 'center', gap: 1,
+                          bgcolor: '#fff3e0', border: '1px solid #ffb74d',
+                          borderRadius: 2, px: 1.5, py: 0.8
+                        }}>
+                          <Box sx={{ width: 26, height: 26, borderRadius: '50%', bgcolor: '#e65100', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 10, fontWeight: 800 }}>
+                            {item.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0,2)}
+                          </Box>
+                          <Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Typography fontSize={11} fontWeight={700} color="#e65100">{item.name}</Typography>
+                              <Chip
+                                label={item.type === "TL's & Managers" ? 'TL' : 'FSE'}
+                                size="small"
+                                sx={{
+                                  height: 14, fontSize: 8, fontWeight: 800, px: 0.3,
+                                  bgcolor: item.type === "TL's & Managers" ? '#e3f2fd' : '#e8f5e9',
+                                  color: item.type === "TL's & Managers" ? '#1565c0' : '#1a4731',
+                                }}
+                              />
+                            </Box>
+                            <Typography fontSize={10} color="#bf360c" fontWeight={600}>
+                              ₹{(item.carryForward || 0).toLocaleString()} pending
+                            </Typography>
+                          </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                    <Typography fontSize={10} color="text.secondary" mt={1}>
+                      💡 These amounts were not used in previous period(s) and are carried forward to the current period.
+                    </Typography>
+                  </Box>
+                );
+              })()}
+
               {summaryLoading ? (
                 <Box display="flex" justifyContent="center" alignItems="center" py={5}>
                   <CircularProgress size={32} sx={{ color: '#1a5c38' }} />
