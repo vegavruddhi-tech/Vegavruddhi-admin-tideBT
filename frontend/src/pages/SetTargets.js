@@ -8,6 +8,9 @@ import {
 import DownloadIcon from '@mui/icons-material/Download';
 import LockIcon from '@mui/icons-material/Lock';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import SearchIcon from '@mui/icons-material/Search';
+import InputAdornment from '@mui/material/InputAdornment';
+import ClearIcon from '@mui/icons-material/Clear';
 import * as XLSX from 'xlsx';
 import axios from 'axios';
 
@@ -61,6 +64,9 @@ export default function SetTargets() {
   // Filter state for targets list
   const [filterMonth, setFilterMonth] = useState(new Date().toLocaleString('en-US', { month: 'long' }));
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [filterTL, setFilterTL]   = useState('');   // selected TL name
+  const [filterFSE, setFilterFSE] = useState('');   // selected FSE name
+  const [filterSearch, setFilterSearch] = useState(''); // free text search
 
   // Form state
   const [targetFor, setTargetFor] = useState('');
@@ -195,12 +201,54 @@ export default function SetTargets() {
   const receiverList = targetRole === 'TL' ? tls.map(t => t.name) : fses.map(f => f.name);
   const totalBtTarget = parseFloat(btTarget || 0) + carryForward;
 
-  // Summary stats from current targets list
-  const totalTargets = targets.length;
-  const achieved100 = targets.filter(t => t.btTarget && (t.btAchieved || 0) >= t.btTarget).length;
-  const totalBTAssigned = targets.reduce((s, t) => s + (t.btTarget || 0), 0);
-  const totalBTAchieved = targets.reduce((s, t) => s + (t.btAchieved || 0), 0);
-  const overallPct = totalBTAssigned > 0 ? Math.round((totalBTAchieved / totalBTAssigned) * 100) : 0;
+  // ── Filter helpers ──────────────────────────────────────────────────────
+  // FSEs under selected TL (for FSE dropdown when TL is selected)
+  const fsesUnderSelectedTL = filterTL
+    ? fses.filter(f => (f.reportingManager || '').toLowerCase().trim() === filterTL.toLowerCase().trim())
+    : fses;
+
+  // TL of selected FSE (for info chip when only FSE is selected)
+  const selectedFSETLInfo = filterFSE && !filterTL
+    ? fses.find(f => f.name === filterFSE)
+    : null;
+
+  // When TL changes, clear FSE selection if FSE is not under the new TL
+  const handleTLChange = (newTL) => {
+    setFilterTL(newTL);
+    if (newTL && filterFSE) {
+      const fseUnderTL = fses.find(f => f.name === filterFSE && (f.reportingManager || '').toLowerCase().trim() === newTL.toLowerCase().trim());
+      if (!fseUnderTL) setFilterFSE('');
+    }
+  };
+
+  // Apply TL / FSE / search filters to the fetched targets
+  const filteredTargets = targets.filter(t => {
+    // TL filter — show targets for FSEs under this TL
+    if (filterTL) {
+      const fseObj = fses.find(f => f.name === t.targetFor);
+      const tlMatch = fseObj
+        ? (fseObj.reportingManager || '').toLowerCase().trim() === filterTL.toLowerCase().trim()
+        : (t.targetFor || '').toLowerCase().trim() === filterTL.toLowerCase().trim(); // TL's own target
+      if (!tlMatch) return false;
+    }
+    // FSE filter
+    if (filterFSE && (t.targetFor || '').toLowerCase().trim() !== filterFSE.toLowerCase().trim()) return false;
+    // Search
+    if (filterSearch) {
+      const q = filterSearch.toLowerCase();
+      if (!(t.targetFor || '').toLowerCase().includes(q) &&
+          !(t.setBy || '').toLowerCase().includes(q) &&
+          !(t.month || '').toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  // Summary stats — computed from filteredTargets
+  const totalTargets   = filteredTargets.length;
+  const achieved100    = filteredTargets.filter(t => t.btTarget && (t.btAchieved || 0) >= t.btTarget).length;
+  const totalBTAssigned = filteredTargets.reduce((s, t) => s + (t.btTarget || 0), 0);
+  const totalBTAchieved = filteredTargets.reduce((s, t) => s + (t.btAchieved || 0), 0);
+  const overallPct     = totalBTAssigned > 0 ? Math.round((totalBTAchieved / totalBTAssigned) * 100) : 0;
 
   if (loading) return <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>;
 
@@ -295,7 +343,7 @@ export default function SetTargets() {
         <Grid item xs={12} md={7}>
           <Card sx={{ borderRadius: 2, border: '1px solid #e0e0e0' }}>
             <CardContent>
-              {/* Header + filter */}
+              {/* Header + filter row 1: month/year + export */}
               <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5} flexWrap="wrap" gap={1}>
                 <Typography variant="h6" fontWeight={700}>📊 Target Achievement</Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -313,6 +361,70 @@ export default function SetTargets() {
                   </Button>
                 </Box>
               </Box>
+
+              {/* Filter row 2: TL → FSE → Search */}
+              <Box sx={{ display: 'flex', gap: 1, mb: 1.5, flexWrap: 'wrap', alignItems: 'center' }}>
+                {/* TL filter */}
+                <Autocomplete
+                  options={['', ...tls.map(t => t.name)]}
+                  value={filterTL || null}
+                  onChange={(_, val) => handleTLChange(val || '')}
+                  renderInput={(params) => <TextField {...params} label="Filter by TL" size="small" placeholder="All TLs" />}
+                  sx={{ width: 170 }}
+                  getOptionLabel={o => o || 'All TLs'}
+                  isOptionEqualToValue={(o, v) => o === v}
+                />
+                {/* FSE filter — shows only FSEs under selected TL if TL is picked */}
+                <Autocomplete
+                  options={['', ...fsesUnderSelectedTL.map(f => f.name)]}
+                  value={filterFSE || null}
+                  onChange={(_, val) => setFilterFSE(val || '')}
+                  renderInput={(params) => <TextField {...params} label={filterTL ? `FSEs under ${filterTL.split(' ')[0]}` : 'Filter by FSE'} size="small" placeholder="All FSEs" />}
+                  sx={{ width: 180 }}
+                  getOptionLabel={o => o || 'All FSEs'}
+                  isOptionEqualToValue={(o, v) => o === v}
+                />
+                {/* Search box */}
+                <TextField
+                  size="small" placeholder="Search name, set by…" value={filterSearch}
+                  onChange={e => setFilterSearch(e.target.value)}
+                  sx={{ width: 190 }}
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" sx={{ color: '#888' }} /></InputAdornment>,
+                    endAdornment: filterSearch ? (
+                      <InputAdornment position="end">
+                        <ClearIcon fontSize="small" sx={{ cursor: 'pointer', color: '#888' }} onClick={() => setFilterSearch('')} />
+                      </InputAdornment>
+                    ) : null
+                  }}
+                />
+                {/* Clear all filters */}
+                {(filterTL || filterFSE || filterSearch) && (
+                  <Button size="small" onClick={() => { setFilterTL(''); setFilterFSE(''); setFilterSearch(''); }}
+                    sx={{ color: '#c62828', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>
+                    Clear
+                  </Button>
+                )}
+              </Box>
+
+              {/* FSE info chip — shows when only FSE is selected (no TL filter) */}
+              {selectedFSETLInfo && (
+                <Box sx={{ mb: 1.5, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <Typography variant="caption" color="text.secondary" fontWeight={600}>FSE Info:</Typography>
+                  {selectedFSETLInfo.reportingManager && (
+                    <Chip label={`TL: ${selectedFSETLInfo.reportingManager}`} size="small"
+                      sx={{ bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 700, fontSize: 10 }} />
+                  )}
+                  {selectedFSETLInfo.phone && (
+                    <Chip label={`📞 ${selectedFSETLInfo.phone}`} size="small"
+                      sx={{ bgcolor: '#f5f5f5', color: '#555', fontSize: 10 }} />
+                  )}
+                  {selectedFSETLInfo.email && (
+                    <Chip label={selectedFSETLInfo.email} size="small"
+                      sx={{ bgcolor: '#f5f5f5', color: '#555', fontSize: 10 }} />
+                  )}
+                </Box>
+              )}
 
               {/* Summary bar */}
               {targets.length > 0 && (
@@ -350,8 +462,12 @@ export default function SetTargets() {
 
               {achievementLoading && <LinearProgress sx={{ mb: 1, borderRadius: 2 }} />}
 
-              {targets.length === 0 ? (
-                <Typography color="text.secondary" textAlign="center" py={4}>No targets for {filterMonth} {filterYear}</Typography>
+              {filteredTargets.length === 0 ? (
+                <Typography color="text.secondary" textAlign="center" py={4}>
+                  {targets.length === 0
+                    ? `No targets for ${filterMonth} ${filterYear}`
+                    : 'No targets match the selected filters'}
+                </Typography>
               ) : (
                 <TableContainer sx={{ maxHeight: 500 }}>
                   <Table size="small" stickyHeader>
@@ -368,19 +484,27 @@ export default function SetTargets() {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {targets.map((t, i) => {
+                      {filteredTargets.map((t, i) => {
                         const dl = daysLeft(t.endDate);
                         const isAdminSet = !t.setByRole || t.setByRole === 'Admin';
                         const btAchieved = t.btAchieved || 0;
                         const rpAchieved = t.rpAchieved || 0;
                         const btPct = t.btTarget ? Math.min(100, Math.round((btAchieved / t.btTarget) * 100)) : 0;
                         const isComplete = btPct >= 100;
+                        // Find TL for this FSE
+                        const fseObj = fses.find(f => f.name === t.targetFor);
+                        const tlName = fseObj?.reportingManager || '';
                         return (
                           <TableRow key={i} hover sx={{ bgcolor: isComplete ? '#f0fdf4' : 'inherit' }}>
                             <TableCell sx={{ fontWeight: 600, fontSize: 12 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
                                 {isComplete && <CheckCircleIcon sx={{ fontSize: 14, color: '#2e7d32' }} />}
-                                {t.targetFor}
+                                <span>{t.targetFor}</span>
+                                {/* Show TL chip inline when no TL filter active */}
+                                {!filterTL && tlName && (
+                                  <Chip label={`TL: ${tlName.split(' ')[0]}`} size="small"
+                                    sx={{ height: 16, fontSize: 9, fontWeight: 700, bgcolor: '#e3f2fd', color: '#1565c0' }} />
+                                )}
                               </Box>
                             </TableCell>
                             <TableCell><Chip label={t.targetRole} size="small" sx={{ fontWeight: 700, fontSize: 10 }} /></TableCell>
