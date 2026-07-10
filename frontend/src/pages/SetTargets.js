@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import LockIcon from '@mui/icons-material/Lock';
-import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import * as XLSX from 'xlsx';
 import axios from 'axios';
 
@@ -18,8 +18,37 @@ function daysLeft(endDate) {
   if (!endDate) return null;
   const end = new Date(endDate);
   const now = new Date();
-  const diff = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
-  return diff;
+  return Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+}
+
+// Achievement progress bar component
+function AchievementBar({ achieved, target, color = '#1a5c38' }) {
+  if (!target || target === 0) return <Typography variant="caption" color="text.disabled">No target</Typography>;
+  const pct = Math.min(100, Math.round((achieved / target) * 100));
+  const isComplete = pct >= 100;
+  return (
+    <Box sx={{ minWidth: 120 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
+        <Typography variant="caption" fontWeight={700} color={isComplete ? '#2e7d32' : color} fontSize={10}>
+          {isComplete ? '🎉 Achieved!' : `${pct}%`}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" fontSize={9}>
+          ₹{(achieved||0).toLocaleString()} / ₹{(target||0).toLocaleString()}
+        </Typography>
+      </Box>
+      <LinearProgress
+        variant="determinate" value={pct}
+        sx={{
+          height: 6, borderRadius: 4,
+          bgcolor: '#e0e0e0',
+          '& .MuiLinearProgress-bar': {
+            bgcolor: isComplete ? '#2e7d32' : pct >= 75 ? '#66bb6a' : pct >= 50 ? '#ffa726' : '#ef5350',
+            borderRadius: 4,
+          }
+        }}
+      />
+    </Box>
+  );
 }
 
 export default function SetTargets() {
@@ -27,6 +56,11 @@ export default function SetTargets() {
   const [tls, setTls] = useState([]);
   const [targets, setTargets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [achievementLoading, setAchievementLoading] = useState(false);
+
+  // Filter state for targets list
+  const [filterMonth, setFilterMonth] = useState(new Date().toLocaleString('en-US', { month: 'long' }));
+  const [filterYear, setFilterYear] = useState(new Date().getFullYear());
 
   // Form state
   const [targetFor, setTargetFor] = useState('');
@@ -45,7 +79,31 @@ export default function SetTargets() {
   const [error, setError] = useState('');
   const [editId, setEditId] = useState(null);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchFSEsTLs(); }, []);
+  useEffect(() => { fetchTargets(); }, [filterMonth, filterYear]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fetchFSEsTLs = async () => {
+    try {
+      const [fseRes, tlRes] = await Promise.all([
+        axios.get(`${API_URL}/fse`),
+        axios.get(`${API_URL}/tl`),
+      ]);
+      setFses(fseRes.data.fses || []);
+      setTls(tlRes.data.tls || []);
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchTargets = async () => {
+    setAchievementLoading(true);
+    try {
+      const params = new URLSearchParams({ withAchievement: 'true' });
+      if (filterMonth) params.set('month', filterMonth);
+      if (filterYear)  params.set('year', filterYear);
+      const res = await axios.get(`${API_URL}/targets?${params}`);
+      setTargets(res.data.targets || []);
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); setAchievementLoading(false); }
+  };
 
   // Auto-fetch carry forward when person + month + year changes
   const fetchCarryForward = useCallback(async (name, m, y) => {
@@ -62,24 +120,8 @@ export default function SetTargets() {
   }, []);
 
   useEffect(() => {
-    if (targetFor && month && year && !editId) {
-      fetchCarryForward(targetFor, month, year);
-    }
+    if (targetFor && month && year && !editId) fetchCarryForward(targetFor, month, year);
   }, [targetFor, month, year, editId, fetchCarryForward]);
-
-  const fetchData = async () => {
-    try {
-      const [fseRes, tlRes, targetsRes] = await Promise.all([
-        axios.get(`${API_URL}/fse`),
-        axios.get(`${API_URL}/tl`),
-        axios.get(`${API_URL}/targets`)
-      ]);
-      setFses(fseRes.data.fses || []);
-      setTls(tlRes.data.tls || []);
-      setTargets(targetsRes.data.targets || []);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
-  };
 
   const handleSubmit = async () => {
     setError(''); setSuccess('');
@@ -95,15 +137,16 @@ export default function SetTargets() {
           targetFor, targetRole, setBy: 'Admin', setByRole: 'Admin',
           btTarget, rpTarget, month, year, startDate, endDate, carryForward
         });
-        if (res.data.success) { setSuccess(`Target set for ${targetFor}${carryForward > 0 ? ` (includes ₹${carryForward.toLocaleString()} carry forward)` : ''}`); }
+        if (res.data.success) {
+          setSuccess(`Target set for ${targetFor}${carryForward > 0 ? ` (includes ₹${carryForward.toLocaleString()} carry forward)` : ''}`);
+        }
       }
       resetForm();
-      fetchData();
+      fetchTargets();
     } catch (err) { setError(err.response?.data?.message || 'Failed'); }
   };
 
   const handleEdit = (t) => {
-    // Admin targets: only admin can edit (setByRole === 'Admin' or not set)
     setEditId(t._id);
     setTargetFor(t.targetFor);
     setTargetRole(t.targetRole);
@@ -119,7 +162,7 @@ export default function SetTargets() {
 
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this target?')) return;
-    try { await axios.delete(`${API_URL}/targets/${id}`); fetchData(); }
+    try { await axios.delete(`${API_URL}/targets/${id}`); fetchTargets(); }
     catch (err) { console.error(err); }
   };
 
@@ -132,8 +175,11 @@ export default function SetTargets() {
     if (targets.length === 0) return;
     const rows = targets.map(t => ({
       'Person': t.targetFor, 'Role': t.targetRole,
-      'BT Target': t.btTarget, 'Original BT Target': t.btTargetOriginal ?? t.btTarget,
-      'Carry Forward': t.carryForward || 0, 'RP Target': t.rpTarget,
+      'BT Target': t.btTarget, 'BT Achieved': t.btAchieved || 0,
+      'BT Achievement %': t.btTarget ? Math.round(((t.btAchieved||0)/t.btTarget)*100) + '%' : '–',
+      'RP Target': t.rpTarget, 'RP Achieved': t.rpAchieved || 0,
+      'Original BT Target': t.btTargetOriginal ?? t.btTarget,
+      'Carry Forward': t.carryForward || 0,
       'Month': t.month, 'Year': t.year,
       'Start Date': t.startDate ? new Date(t.startDate).toLocaleDateString('en-IN') : '',
       'End Date': t.endDate ? new Date(t.endDate).toLocaleDateString('en-IN') : '',
@@ -143,11 +189,18 @@ export default function SetTargets() {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Targets');
-    XLSX.writeFile(wb, `TideBT_Targets_${new Date().toISOString().slice(0,10)}.xlsx`);
+    XLSX.writeFile(wb, `TideBT_Targets_${filterMonth}_${filterYear}.xlsx`);
   };
 
   const receiverList = targetRole === 'TL' ? tls.map(t => t.name) : fses.map(f => f.name);
   const totalBtTarget = parseFloat(btTarget || 0) + carryForward;
+
+  // Summary stats from current targets list
+  const totalTargets = targets.length;
+  const achieved100 = targets.filter(t => t.btTarget && (t.btAchieved || 0) >= t.btTarget).length;
+  const totalBTAssigned = targets.reduce((s, t) => s + (t.btTarget || 0), 0);
+  const totalBTAchieved = targets.reduce((s, t) => s + (t.btAchieved || 0), 0);
+  const overallPct = totalBTAssigned > 0 ? Math.round((totalBTAchieved / totalBTAssigned) * 100) : 0;
 
   if (loading) return <Box display="flex" justifyContent="center" py={8}><CircularProgress /></Box>;
 
@@ -217,7 +270,6 @@ export default function SetTargets() {
               <TextField fullWidth size="small" type="number" label="RP Target (count)" value={rpTarget}
                 onChange={e => setRpTarget(e.target.value)} sx={{ mb: 2 }} />
 
-              {/* Date range — deadline */}
               <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
                 📅 Deadline Period (optional)
               </Typography>
@@ -233,8 +285,7 @@ export default function SetTargets() {
                 {editId ? 'Update Target' : 'Set Target'}
               </Button>
               {editId && (
-                <Button fullWidth onClick={resetForm}
-                  sx={{ mt: 1, color: '#c62828', fontWeight: 700 }}>Cancel Edit</Button>
+                <Button fullWidth onClick={resetForm} sx={{ mt: 1, color: '#c62828', fontWeight: 700 }}>Cancel Edit</Button>
               )}
             </CardContent>
           </Card>
@@ -244,25 +295,73 @@ export default function SetTargets() {
         <Grid item xs={12} md={7}>
           <Card sx={{ borderRadius: 2, border: '1px solid #e0e0e0' }}>
             <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                <Typography variant="h6" fontWeight={700}>Current Targets</Typography>
-                <Button startIcon={<DownloadIcon />} size="small" onClick={handleExport}
-                  variant="outlined" sx={{ color: '#1a5c38', borderColor: '#1a5c38', fontWeight: 700, fontSize: 11 }}>
-                  Export Excel
-                </Button>
+              {/* Header + filter */}
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5} flexWrap="wrap" gap={1}>
+                <Typography variant="h6" fontWeight={700}>📊 Target Achievement</Typography>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <TextField select size="small" label="Month" value={filterMonth}
+                    onChange={e => setFilterMonth(e.target.value)} sx={{ width: 120 }}>
+                    {MONTHS.map(m => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+                  </TextField>
+                  <TextField select size="small" label="Year" value={filterYear}
+                    onChange={e => setFilterYear(e.target.value)} sx={{ width: 85 }}>
+                    {[2026, 2025, 2024].map(y => <MenuItem key={y} value={y}>{y}</MenuItem>)}
+                  </TextField>
+                  <Button startIcon={<DownloadIcon />} size="small" onClick={handleExport}
+                    variant="outlined" sx={{ color: '#1a5c38', borderColor: '#1a5c38', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>
+                    Export
+                  </Button>
+                </Box>
               </Box>
+
+              {/* Summary bar */}
+              {targets.length > 0 && (
+                <Box sx={{ mb: 2, p: 1.5, bgcolor: '#f5faf7', borderRadius: 2, border: '1px solid #c8e6c9' }}>
+                  <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap', mb: 1 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Total Targets</Typography>
+                      <Typography fontWeight={800} fontSize={18} color="#1a5c38">{totalTargets}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">🎉 Fully Achieved</Typography>
+                      <Typography fontWeight={800} fontSize={18} color="#2e7d32">{achieved100}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Total BT Assigned</Typography>
+                      <Typography fontWeight={800} fontSize={18} color="#e65100">₹{totalBTAssigned.toLocaleString()}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">Total BT Achieved</Typography>
+                      <Typography fontWeight={800} fontSize={18} color="#1565c0">₹{totalBTAchieved.toLocaleString()}</Typography>
+                    </Box>
+                  </Box>
+                  <Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.3 }}>
+                      <Typography variant="caption" fontWeight={700}>Overall Achievement</Typography>
+                      <Typography variant="caption" fontWeight={700} color={overallPct >= 100 ? '#2e7d32' : '#e65100'}>{overallPct}%</Typography>
+                    </Box>
+                    <LinearProgress variant="determinate" value={Math.min(100, overallPct)}
+                      sx={{ height: 8, borderRadius: 4, bgcolor: '#e0e0e0',
+                        '& .MuiLinearProgress-bar': { bgcolor: overallPct >= 100 ? '#2e7d32' : overallPct >= 75 ? '#66bb6a' : overallPct >= 50 ? '#ffa726' : '#ef5350', borderRadius: 4 }
+                      }} />
+                  </Box>
+                </Box>
+              )}
+
+              {achievementLoading && <LinearProgress sx={{ mb: 1, borderRadius: 2 }} />}
+
               {targets.length === 0 ? (
-                <Typography color="text.secondary" textAlign="center" py={4}>No targets set yet</Typography>
+                <Typography color="text.secondary" textAlign="center" py={4}>No targets for {filterMonth} {filterYear}</Typography>
               ) : (
-                <TableContainer sx={{ maxHeight: 550 }}>
+                <TableContainer sx={{ maxHeight: 500 }}>
                   <Table size="small" stickyHeader>
                     <TableHead>
-                      <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 11 } }}>
+                      <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 11, bgcolor: '#f5faf7' } }}>
                         <TableCell>Person</TableCell>
                         <TableCell>Role</TableCell>
                         <TableCell align="right">BT Target</TableCell>
+                        <TableCell sx={{ minWidth: 150 }}>BT Progress</TableCell>
                         <TableCell align="center">RP</TableCell>
-                        <TableCell>Period</TableCell>
                         <TableCell>Deadline</TableCell>
                         <TableCell>Set By</TableCell>
                         <TableCell align="center">Actions</TableCell>
@@ -272,24 +371,40 @@ export default function SetTargets() {
                       {targets.map((t, i) => {
                         const dl = daysLeft(t.endDate);
                         const isAdminSet = !t.setByRole || t.setByRole === 'Admin';
+                        const btAchieved = t.btAchieved || 0;
+                        const rpAchieved = t.rpAchieved || 0;
+                        const btPct = t.btTarget ? Math.min(100, Math.round((btAchieved / t.btTarget) * 100)) : 0;
+                        const isComplete = btPct >= 100;
                         return (
-                          <TableRow key={i} hover>
-                            <TableCell sx={{ fontWeight: 600, fontSize: 12 }}>{t.targetFor}</TableCell>
-                            <TableCell><Chip label={t.targetRole} size="small" sx={{ fontWeight: 700, fontSize: 10 }} /></TableCell>
-                            <TableCell align="right">
-                              <Box>
-                                <Typography variant="body2" fontWeight={700} color="#e65100" fontSize={12}>
-                                  ₹{(t.btTarget || 0).toLocaleString()}
-                                </Typography>
-                                {t.carryForward > 0 && (
-                                  <Typography variant="caption" color="#f57c00" fontSize={9}>
-                                    incl. ₹{t.carryForward.toLocaleString()} CF
-                                  </Typography>
-                                )}
+                          <TableRow key={i} hover sx={{ bgcolor: isComplete ? '#f0fdf4' : 'inherit' }}>
+                            <TableCell sx={{ fontWeight: 600, fontSize: 12 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                {isComplete && <CheckCircleIcon sx={{ fontSize: 14, color: '#2e7d32' }} />}
+                                {t.targetFor}
                               </Box>
                             </TableCell>
-                            <TableCell align="center" sx={{ fontWeight: 700, color: '#7c3aed', fontSize: 12 }}>{t.rpTarget}</TableCell>
-                            <TableCell sx={{ fontSize: 11 }}>{t.month} {t.year}</TableCell>
+                            <TableCell><Chip label={t.targetRole} size="small" sx={{ fontWeight: 700, fontSize: 10 }} /></TableCell>
+                            <TableCell align="right">
+                              <Typography variant="body2" fontWeight={700} color="#e65100" fontSize={12}>
+                                ₹{(t.btTarget || 0).toLocaleString()}
+                              </Typography>
+                              {t.carryForward > 0 && (
+                                <Typography variant="caption" color="#f57c00" fontSize={9} display="block">
+                                  incl. ₹{t.carryForward.toLocaleString()} CF
+                                </Typography>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <AchievementBar achieved={btAchieved} target={t.btTarget} />
+                            </TableCell>
+                            <TableCell align="center">
+                              <Typography fontWeight={700} color={rpAchieved >= t.rpTarget ? '#2e7d32' : '#7c3aed'} fontSize={12}>
+                                {rpAchieved}/{t.rpTarget}
+                              </Typography>
+                              {rpAchieved >= t.rpTarget && rpAchieved > 0 && (
+                                <Typography fontSize={9} color="#2e7d32">✓ Done</Typography>
+                              )}
+                            </TableCell>
                             <TableCell>
                               {t.endDate ? (
                                 <Box>
@@ -297,15 +412,10 @@ export default function SetTargets() {
                                     {new Date(t.endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                                   </Typography>
                                   {dl !== null && (
-                                    <Chip
-                                      label={dl < 0 ? 'Expired' : dl === 0 ? 'Today!' : `${dl}d left`}
-                                      size="small"
-                                      sx={{
-                                        ml: 0.5, fontSize: 9, fontWeight: 700,
+                                    <Chip label={dl < 0 ? 'Expired' : dl === 0 ? 'Today!' : `${dl}d`}
+                                      size="small" sx={{ ml: 0.5, fontSize: 9, fontWeight: 700,
                                         bgcolor: dl < 0 ? '#fee2e2' : dl <= 3 ? '#fff3e0' : '#e8f5e9',
-                                        color: dl < 0 ? '#b91c1c' : dl <= 3 ? '#e65100' : '#1a4731',
-                                      }}
-                                    />
+                                        color: dl < 0 ? '#b91c1c' : dl <= 3 ? '#e65100' : '#1a4731' }} />
                                   )}
                                 </Box>
                               ) : '–'}
@@ -336,3 +446,5 @@ export default function SetTargets() {
     </Box>
   );
 }
+
+// (end of file)

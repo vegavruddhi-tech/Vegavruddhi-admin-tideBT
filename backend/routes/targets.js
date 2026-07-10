@@ -1,11 +1,49 @@
 const express = require('express');
 const router = express.Router();
 
-// GET /api/targets - Get all targets
+// Helper: find BT_TL_CONNECT collection for a month+year
+const findBTCollection = (allCollections, monthName, yearStr) => {
+  const ABBR = { 'JANUARY':'JAN','FEBRUARY':'FEB','MARCH':'MAR','APRIL':'APR','MAY':'MAY','JUNE':'JUN','JULY':'JUL','AUGUST':'AUG','SEPTEMBER':'SEP','OCTOBER':'OCT','NOVEMBER':'NOV','DECEMBER':'DEC' };
+  const mu   = (monthName || '').toUpperCase();
+  const abbr = ABBR[mu] || mu;
+  const btCols = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
+  const matchesMonth = cu => cu.includes(mu) || cu.includes(abbr);
+  if (yearStr) {
+    const sy = String(yearStr).slice(-2);
+    const m  = btCols.find(c => { const cu = c.toUpperCase(); return matchesMonth(cu) && (cu.includes(String(yearStr)) || cu.includes(sy)); });
+    if (m) return m;
+  }
+  return btCols.find(c => matchesMonth(c.toUpperCase())) || null;
+};
+
+// Helper: get BT achieved for a person (FSE or TL) for a given month+year
+const getBTAchieved = async (db, name, month, year) => {
+  try {
+    const allCollections = (await db.listCollections().toArray()).map(c => c.name);
+    const btCol = findBTCollection(allCollections, month, year);
+    if (!btCol) return 0;
+
+    const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Get merchant numbers from bt_master for this FSE/TL
+    const masterDocs = await db.collection('bt_master').find({
+      fseName: { $regex: new RegExp(`^\\s*${escape(name.trim())}\\s*\\d*\\s*$`, 'i') }
+    }, { projection: { merchantNumber: 1 } }).toArray();
+    const nums = masterDocs.map(m => (m.merchantNumber || '').trim()).filter(Boolean);
+    if (nums.length === 0) return 0;
+
+    const btDocs = await db.collection(btCol).find(
+      { merchantNumber: { $in: nums } },
+      { projection: { stage3: 1 } }
+    ).toArray();
+    return btDocs.reduce((s, d) => s + (parseFloat(String(d.stage3 || '0').replace(/,/g,'')) || 0), 0);
+  } catch { return 0; }
+};
+
+// GET /api/targets - Get all targets (with optional BT achievement data)
 router.get('/', async (req, res) => {
   try {
     const db = req.db;
-    const { month, year } = req.query;
+    const { month, year, withAchievement } = req.query;
     const query = {};
     if (month) query.month = month;
     if (year) query.year = parseInt(year);
@@ -14,6 +52,63 @@ router.get('/', async (req, res) => {
       .find(query)
       .sort({ createdAt: -1 })
       .toArray();
+
+    // Optionally enrich with BT achieved per target
+    if (withAchievement === 'true' && targets.length > 0) {
+      const allCollections = (await db.listCollections().toArray()).map(c => c.name);
+      const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // Group targets by (person, month, year) to avoid duplicate DB queries
+      const groupKey = t => `${(t.targetFor||'').toLowerCase()}__${t.month}__${t.year}`;
+      const uniqueGroups = {};
+      targets.forEach(t => { uniqueGroups[groupKey(t)] = { name: t.targetFor, month: t.month, year: t.year }; });
+
+      // Fetch BT achieved for each unique group in parallel
+      const achievedMap = {};
+      await Promise.all(Object.entries(uniqueGroups).map(async ([key, g]) => {
+        const btCol = findBTCollection(allCollections, g.month, String(g.year));
+        if (!btCol) { achievedMap[key] = 0; return; }
+
+        const masterDocs = await db.collection('bt_master').find({
+          fseName: { $regex: new RegExp(`^\\s*${escape((g.name||'').trim())}\\s*\\d*\\s*$`, 'i') }
+        }, { projection: { merchantNumber: 1, _id: 0 } }).toArray();
+        const nums = masterDocs.map(m => (m.merchantNumber||'').trim()).filter(Boolean);
+        if (nums.length === 0) { achievedMap[key] = 0; return; }
+
+        const btDocs = await db.collection(btCol).find(
+          { merchantNumber: { $in: nums } },
+          { projection: { stage3: 1, _id: 0 } }
+        ).toArray();
+        achievedMap[key] = btDocs.reduce((s, d) => s + (parseFloat(String(d.stage3||'0').replace(/,/g,''))||0), 0);
+      }));
+
+      // Also get RP achieved (rewardPassPro === 'active')
+      const rpAchievedMap = {};
+      await Promise.all(Object.entries(uniqueGroups).map(async ([key, g]) => {
+        const btCol = findBTCollection(allCollections, g.month, String(g.year));
+        if (!btCol) { rpAchievedMap[key] = 0; return; }
+        const masterDocs = await db.collection('bt_master').find({
+          fseName: { $regex: new RegExp(`^\\s*${escape((g.name||'').trim())}\\s*\\d*\\s*$`, 'i') }
+        }, { projection: { merchantNumber: 1, _id: 0 } }).toArray();
+        const nums = masterDocs.map(m => (m.merchantNumber||'').trim()).filter(Boolean);
+        if (nums.length === 0) { rpAchievedMap[key] = 0; return; }
+        const btDocs = await db.collection(btCol).find(
+          { merchantNumber: { $in: nums } },
+          { projection: { rewardPassPro: 1, priorityPassPro: 1, _id: 0 } }
+        ).toArray();
+        rpAchievedMap[key] = btDocs.filter(d =>
+          (d.rewardPassPro||d.priorityPassPro||'').toLowerCase() === 'active'
+        ).length;
+      }));
+
+      // Attach achievement to each target
+      const enriched = targets.map(t => ({
+        ...t,
+        btAchieved: achievedMap[groupKey(t)] || 0,
+        rpAchieved: rpAchievedMap[groupKey(t)] || 0,
+      }));
+      return res.json({ success: true, targets: enriched });
+    }
 
     res.json({ success: true, targets });
   } catch (error) {
