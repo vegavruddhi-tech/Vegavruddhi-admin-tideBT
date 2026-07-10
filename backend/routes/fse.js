@@ -73,7 +73,7 @@ router.get('/merchants/all', async (req, res) => {
     const tlMap = {};
     accessList.forEach(a => { if (a.fseName) tlMap[a.fseName] = a.tlName || '–'; });
 
-    // Step 2: BT collection
+    // Step 2: BT collection — only use BT_TL_CONNECT* collections
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
     const btCollections = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
     let btCollectionName = null;
@@ -177,7 +177,7 @@ router.get('/merchants/all-details', async (req, res) => {
     }
     console.log(`[Cache MISS] ${ck}`);
 
-    // BT collection
+    // BT collection — only use BT_TL_CONNECT* collections
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
     const btCollections = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
     let btCollectionName = null;
@@ -192,9 +192,9 @@ router.get('/merchants/all-details', async (req, res) => {
       {}, { projection: { merchantNumber: 1, merchantName: 1, fseName: 1, tl: 1, _id: 0 } }
     ).toArray();
 
-    const masterNumSet = new Set(masterDocs.map(m => (m.merchantNumber||'').trim()).filter(Boolean));
+    const merchantNums = masterDocs.map(m => (m.merchantNumber||'').trim()).filter(Boolean);
 
-    // Build merchant map from bt_master (old/assigned merchants)
+    // Build merchant map
     const merchantMap = {};
     masterDocs.forEach(m => {
       const key = (m.merchantNumber||'').trim();
@@ -202,43 +202,14 @@ router.get('/merchants/all-details', async (req, res) => {
       merchantMap[key] = {
         merchantNumber: key, merchantName: (m.merchantName||'').trim()||'–',
         fseName: (m.fseName||'').trim(), tl: (m.tl||'').trim(),
-        tlName: (m.tl||'').trim() || '–',
+        tlName: (m.tl||'').trim() || '–',  // explicit tlName field for TL Overview
         onboardingStatus: 'Pending', lastActivity: null,
         stage3: 0, stage3Gap: 0, passLive: '–', rewardPassPro: '–',
-        upiTxnCount: 0, btVerified: false, merchantCategory: '–', source: 'bt_master'
+        upiTxnCount: 0, btVerified: false, merchantCategory: '–'
       };
     });
 
-    // Also get NEW merchants from TideBT Form Responses that are NOT in bt_master
-    // These are newly onboarded merchants submitted via the app/form
-    const newFormDocs = await db.collection('TideBT Form Responses').find(
-      {}, { projection: { merchantNumber: 1, merchantName: 1, employeeName: 1, createdAt: 1, onboardingStatus: 1, merchantOpinion: 1, merchantCategory: 1, _id: 0 } }
-    ).sort({ createdAt: -1 }).toArray();
-
-    // Add new merchants not in bt_master to the merchant map
-    newFormDocs.forEach(f => {
-      const key = (f.merchantNumber || '').trim();
-      if (!key || masterNumSet.has(key)) return; // skip if already in bt_master
-      if (!merchantMap[key]) {
-        merchantMap[key] = {
-          merchantNumber: key,
-          merchantName:   (f.merchantName || '').trim() || '–',
-          fseName:        (f.employeeName || '').trim(),
-          tl:             '–',
-          tlName:         '–',
-          onboardingStatus: (f.onboardingStatus || f.merchantOpinion || 'Pending').trim(),
-          lastActivity:   f.createdAt || null,
-          stage3: 0, stage3Gap: 0, passLive: '–', rewardPassPro: '–',
-          upiTxnCount: 0, btVerified: false,
-          merchantCategory: (f.merchantCategory || '').trim(),
-          source: 'form_responses'
-        };
-      }
-    });
-
-    const merchantNums = Object.keys(merchantMap);
-
-    // Enrich from TideBT Form Responses (latest per merchant) — for all merchants
+    // Enrich from TideBT Form Responses (latest per merchant)
     const formDocs = await db.collection('TideBT Form Responses').find(
       { merchantNumber: { $in: merchantNums } },
       { projection: { merchantNumber: 1, createdAt: 1, merchantOpinion: 1, onboardingStatus: 1, merchantCategory: 1, _id: 0 } }
@@ -295,8 +266,7 @@ router.get('/merchants/all-details', async (req, res) => {
       upiTxnCount:    m.upiTxnCount,
       upiAmount:      m.upiAmount || 0,
       btVerified:     m.btVerified,
-      merchantCategory: m.merchantCategory,
-      isNewMerchant:  m.source === 'form_responses'
+      merchantCategory: m.merchantCategory
     }));
     const result = { success: true, merchants, btCollection: btCollectionName };
     await cacheSet(db, ck, result, 0); // permanent — busted on write
@@ -324,7 +294,7 @@ router.get('/merchants/:fseName', async (req, res) => {
     }
     console.log(`[Cache MISS] ${ck}`);
 
-    // BT collection
+    // BT collection — only use BT_TL_CONNECT* collections
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
     const btCollections = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
     let btCollectionName = null;
@@ -339,6 +309,10 @@ router.get('/merchants/:fseName', async (req, res) => {
       { fseName: { $regex: new RegExp(`^\\s*${escape(fseName)}\\s*\\d*\\s*$`, 'i') } },
       { projection: { merchantNumber: 1, merchantName: 1, fseName: 1, tl: 1, _id: 0 } }
     ).toArray();
+
+    if (masterDocs.length === 0) return res.json({ success: true, merchants: [] });
+
+    const merchantNums = masterDocs.map(m => (m.merchantNumber || '').trim()).filter(Boolean);
 
     // Build merchant map
     const merchantMap = {};
@@ -355,39 +329,6 @@ router.get('/merchants/:fseName', async (req, res) => {
         rewardsPassProActiveDate: '–', latestOpinion: '–', merchantCategory: '–', visitCount: 0
       };
     });
-
-    // Also include new merchants from TideBT Form Responses not yet in bt_master
-    const newFormMerchants = await db.collection('TideBT Form Responses').find(
-      { merchantNumber: { $exists: true, $ne: '' } },
-      { projection: { merchantNumber: 1, merchantName: 1, employeeName: 1, createdAt: 1, onboardingStatus: 1, merchantOpinion: 1, merchantCategory: 1, _id: 0 } }
-    ).sort({ createdAt: -1 }).toArray();
-
-    newFormMerchants.forEach(f => {
-      const key = (f.merchantNumber || '').trim();
-      if (!key || merchantMap[key]) return; // skip if already in map
-      // Only add if this form belongs to the requested FSE
-      const formFse = (f.employeeName || '').trim();
-      if (!new RegExp(`^\\s*${escape(fseName)}\\s*\\d*\\s*$`, 'i').test(formFse)) return;
-      merchantMap[key] = {
-        merchantNumber: key,
-        merchantName:   (f.merchantName || '').trim() || '–',
-        fseName:        formFse,
-        tl:             '–',
-        onboardingStatus: (f.onboardingStatus || f.merchantOpinion || 'Pending').trim(),
-        submissionDate: f.createdAt || null,
-        lastActivity:   f.createdAt || null,
-        stage3: 0, stage3Gap: 0, passLive: '–', rewardPassPro: '–',
-        upiActive: '–', upiTxnCount: 0, upiAmount: 0,
-        priorityPassStatus: '–', msmegstStatus: '–', insuranceStatus: '–',
-        rewardsPassProActiveDate: '–', latestOpinion: '–',
-        merchantCategory: (f.merchantCategory || '').trim(), visitCount: 0,
-        isNewMerchant: true
-      };
-    });
-
-    if (Object.keys(merchantMap).length === 0) return res.json({ success: true, merchants: [] });
-
-    const merchantNums = Object.keys(merchantMap);
 
     // Enrich from TideBT Form Responses — only latest per merchant
     const formDocs = await db.collection('TideBT Form Responses').find(

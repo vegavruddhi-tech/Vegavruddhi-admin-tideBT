@@ -29,9 +29,12 @@ export default function DateFilter({
   for (let y = currentYear; y >= currentYear - 5; y--) years.push(y);
 
   // Filter FSE options based on selected TL reporting manager
+  // Uses partial match to handle "Dheeraj" matching "Dheeraj Anand" etc.
   const filteredFses = fses.filter(f => {
     if (!selectedTlFilter) return true;
-    return f.reportingManager === selectedTlFilter;
+    const tlLower = selectedTlFilter.toLowerCase();
+    const rm = (f.reportingManager || '').toLowerCase();
+    return rm === tlLower || rm.includes(tlLower) || tlLower.includes(rm.split(' ')[0]);
   });
 
   return (

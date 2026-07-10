@@ -59,15 +59,14 @@ const findBTCollection = (allCollections, monthName, yearStr) => {
   const mu    = monthName.toUpperCase();
   const abbr  = MONTH_ABBR[mu] || mu;
   const sy    = yearStr ? yearStr.slice(-2) : null;
+  // Only use BT_TL_CONNECT* collections — never tl_connect_*
   const btCols = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
-  const tlCols = allCollections.filter(c => c.toUpperCase().includes('TL_CONNECT') && !c.toUpperCase().startsWith('BT_TL_CONNECT'));
-  const candidates = [...btCols, ...tlCols];
   const matchesMonth = cu => cu.includes(mu) || cu.includes(abbr);
   if (yearStr) {
-    const m = candidates.find(c => { const cu = c.toUpperCase(); return matchesMonth(cu) && (cu.includes(yearStr) || (sy && cu.includes(sy))); });
+    const m = btCols.find(c => { const cu = c.toUpperCase(); return matchesMonth(cu) && (cu.includes(yearStr) || (sy && cu.includes(sy))); });
     if (m) return m;
   }
-  return candidates.find(c => matchesMonth(c.toUpperCase())) || null;
+  return btCols.find(c => matchesMonth(c.toUpperCase())) || null;
 };
 
 // Helper: compute cumulative carry-forward per person for all months before curMonth

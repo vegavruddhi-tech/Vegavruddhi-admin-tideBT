@@ -113,14 +113,15 @@ const { cacheGet, cacheSet, cacheKey, cacheInvalidate } = require('../utils/cach
 async function findBTCollection(db, selectedMonth, selectedYear) {
   if (!selectedMonth) return null;
   const all = (await db.listCollections().toArray()).map(c => c.name);
-  const bt  = all.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
+  // Only use BT_TL_CONNECT* collections — never tl_connect_*
+  const btCols  = all.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
   const mu  = selectedMonth.toUpperCase();
   if (selectedYear) {
     const yr = String(selectedYear); const sy = yr.slice(-2);
-    const m = bt.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) && (cu.includes(yr)||cu.includes(sy)); });
+    const m = btCols.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) && (cu.includes(yr)||cu.includes(sy)); });
     if (m) return m;
   }
-  return bt.find(c => c.toUpperCase().includes(mu)) || null;
+  return btCols.find(c => c.toUpperCase().includes(mu)) || null;
 }
 
 // Helper: enrich merchants with BT/RP data
