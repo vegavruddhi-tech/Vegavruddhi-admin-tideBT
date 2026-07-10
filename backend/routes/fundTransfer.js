@@ -336,6 +336,33 @@ router.get('/usage-summary', async (req, res) => {
       }
     }
 
+    // Step 2b: Behavioral TL detection — anyone who sends fund to others (not VV/Admin) is a TL/distributor
+    // This catches cases like Niteesh Kumar Saroj who appears as fseName in TideBT_Access
+    // but also distributes fund to FSEs acting as a TL.
+    // Rule: if a person sends fund AND receives "TL's & Managers" type payments → they are a TL
+    const ADMIN_SENDERS = new Set(['admin', 'accountant', 'vv']);
+    const tlReceivers = new Set(
+      allPayments
+        .filter(p => (p.transferToWhom || '').trim() === "TL's & Managers")
+        .map(p => (p.transferTo || '').trim())
+        .filter(Boolean)
+    );
+    const distributors = new Set(
+      allPayments
+        .filter(p => {
+          const sender   = (p.senderName || '').trim();
+          const receiver = (p.transferTo || '').trim();
+          return sender && receiver && sender !== receiver && !ADMIN_SENDERS.has(sender.toLowerCase());
+        })
+        .map(p => (p.senderName || '').trim())
+    );
+    // Anyone who both receives TL-type payments AND distributes → classify as TL
+    for (const name of distributors) {
+      if (tlReceivers.has(name) && nameRoleMap[name] !== "TL's & Managers") {
+        nameRoleMap[name] = "TL's & Managers";
+      }
+    }
+
     // Step 3: Remove names with no activity in selected period
     if (isFilterActive) {
       const filteredReceiverNames = new Set(filteredPayments.map(p => (p.transferTo || '').trim()).filter(Boolean));
@@ -473,15 +500,45 @@ router.get('/usage-summary', async (req, res) => {
     // This ensures carryForward reflects the real cumulative balance across all months
 
     // ── Compute cumulative carry-forward for months before selectedMonth ───
-    // isTLMap must include ALL known TLs (from TideBT_Access), not just those active this month
+    // isTLMap: anyone who has distributed fund to others (senderName in payments, excluding VV/Admin).
+    // This catches TLs not in TideBT_Access.tlName (like Niteesh Kumar Saroj who appears only as fseName).
+    const SKIP_SENDERS = new Set(['admin', 'accountant', 'vv']);
     const isTLMap = {};
-    // Add from TideBT_Access tlNameSet (authoritative)
+
+    // Add from TideBT_Access tlNameSet
     for (const name of tlNameSet) {
-      if (!fseNameSet.has(name)) isTLMap[name.toLowerCase()] = true;
+      isTLMap[name.toLowerCase()] = true;
     }
+    // Add from payment behavior — anyone who sent fund to someone else is acting as a TL/distributor
+    allPayments.forEach(p => {
+      const sender   = (p.senderName || '').trim().toLowerCase();
+      const receiver = (p.transferTo || '').trim().toLowerCase();
+      if (!sender || !receiver || sender === receiver) return;
+      if (SKIP_SENDERS.has(sender)) return;
+      isTLMap[sender] = true;
+    });
     // Also add from current nameRoleMap
-    names.forEach(n => { 
-      if (nameRoleMap[n] === "TL's & Managers") isTLMap[n.toLowerCase()] = true; 
+    names.forEach(n => {
+      if (nameRoleMap[n] === "TL's & Managers") isTLMap[n.toLowerCase()] = true;
+    });
+
+    // Active members for carry-forward filtering — includes anyone in TideBT_Access (fseName OR tlName)
+    // PLUS anyone who is currently distributing payments (behavioral TLs like Niteesh)
+    const activeNames = new Set([
+      ...[...fseNameSet].map(n => n.toLowerCase()),
+      ...[...tlNameSet].map(n => n.toLowerCase())
+    ]);
+    // Also add behavioral TLs who are in current period's payments
+    allPayments.forEach(p => {
+      const sender = (p.senderName || '').trim().toLowerCase();
+      if (!sender || SKIP_SENDERS.has(sender)) return;
+      if (fseNameSet.has(sender) || tlNameSet.has(sender)) return; // already in set
+      // Check if they appear as receiver too — only keep as active if they receive from Admin/VV
+      const receivesFromAdmin = allPayments.some(q =>
+        (q.transferTo || '').trim().toLowerCase() === sender &&
+        SKIP_SENDERS.has((q.senderName || '').trim().toLowerCase())
+      );
+      if (receivesFromAdmin) activeNames.add(sender);
     });
 
     let carryMap = {};
@@ -490,13 +547,7 @@ router.get('/usage-summary', async (req, res) => {
         db, allCollections, allPayments, numToFSE, isTLMap,
         selectedMonth, parseInt(selectedYear)
       );
-      // ── Only keep carry-forward for ACTIVE members in TideBT_Access ─────
-      // People who left or are no longer active should NOT show pending carry-forward.
-      // Their pending balance is considered settled when they exit.
-      const activeNames = new Set([
-        ...[...fseNameSet].map(n => n.toLowerCase()),
-        ...[...tlNameSet].map(n => n.toLowerCase())
-      ]);
+      // Only keep carry-forward for active members
       Object.keys(carryMap).forEach(k => {
         if (!activeNames.has(k)) delete carryMap[k];
       });
