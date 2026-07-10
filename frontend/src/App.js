@@ -143,6 +143,41 @@ function NavbarContent({ page, setPage, mode, setMode, user, handleLogout }) {
           )}
 
           {/* Theme toggle */}
+          <Tooltip title="Switch to FSE Admin Panel">
+            <Button
+              size="small"
+              onClick={() => {
+                const auth = localStorage.getItem("vv_tidebt_auth") || localStorage.getItem("vv_auth");
+                // Use env var if set, else auto-detect prod vs dev
+                const fseUrl = process.env.REACT_APP_FSE_ADMIN_URL
+                  || (window.location.hostname === 'localhost'
+                      ? 'http://localhost:3002'
+                      : 'https://vegavruddhi-admin-panel-tq8t.vercel.app');
+                const url = auth
+                  ? `${fseUrl}?auth=${encodeURIComponent(auth)}`
+                  : fseUrl;
+                window.open(url, '_blank');
+              }}
+              sx={{
+                color: "#fff",
+                background: "rgba(255,255,255,0.1)",
+                border: "1px solid rgba(255,255,255,0.25)",
+                fontSize: "0.7rem",
+                fontWeight: 700,
+                px: 1.2,
+                py: 0.5,
+                minWidth: 'auto',
+                textTransform: 'none',
+                letterSpacing: 0.3,
+                "&:hover": { background: "rgba(255,255,255,0.2)", borderColor: "rgba(255,255,255,0.5)" },
+                transition: "all 0.2s ease",
+                whiteSpace: 'nowrap',
+              }}
+            >
+              🔁 FSE Panel
+            </Button>
+          </Tooltip>
+
           <Tooltip title={mode === "dark" ? "Light Mode" : "Dark Mode"}>
             <IconButton
               onClick={() => setMode((p) => (p === "light" ? "dark" : "light"))}
