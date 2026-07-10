@@ -124,22 +124,27 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
     const receiver = (p.transferTo     || '').trim().toLowerCase();
     const sender   = (p.senderName     || '').trim().toLowerCase();
     const whom     = (p.transferToWhom || '').trim();
+    const amount   = p.amount || 0;
 
-    // Received: only count payment matching the receiver's role type
-    // TL received = "TL's & Managers" payments, FSE received = "FSE Ground Team" payments
+    // Received: negative amounts (returns) always count regardless of whom type —
+    // admins often enter wrong transferToWhom when recording a fund return.
+    // Positive amounts: match role to whom type as usual.
     if (receiver) {
       const isTLReceiver = isTLMap[receiver] === true;
-      if ((isTLReceiver && whom === "TL's & Managers") ||
-          (!isTLReceiver && whom === "FSE Ground Team") ||
-          !whom) {
-        monthPayments[monthName].received[receiver] = (monthPayments[monthName].received[receiver] || 0) + (p.amount || 0);
+      if (amount < 0) {
+        // Always count returns — wrong whom type is common
+        monthPayments[monthName].received[receiver] = (monthPayments[monthName].received[receiver] || 0) + amount;
+      } else if ((isTLReceiver && whom === "TL's & Managers") ||
+                 (!isTLReceiver && whom === "FSE Ground Team") ||
+                 !whom) {
+        monthPayments[monthName].received[receiver] = (monthPayments[monthName].received[receiver] || 0) + amount;
       }
     }
 
     // Sent: only TL outgoing to FSEs (FSE Ground Team type, not self-transfer, not VV/Admin)
     if (sender && sender !== 'admin' && sender !== 'accountant' && sender !== 'vv' &&
         receiver && receiver !== sender && whom === "FSE Ground Team") {
-      monthPayments[monthName].sent[sender] = (monthPayments[monthName].sent[sender] || 0) + (p.amount || 0);
+      monthPayments[monthName].sent[sender] = (monthPayments[monthName].sent[sender] || 0) + amount;
     }
   });
 
@@ -414,35 +419,50 @@ router.get('/usage-summary', async (req, res) => {
     // receivedMap: net received per person in the filtered period
     // For TLs: count TL's & Managers type payments (positive and negative/reversals)
     // For FSEs: count FSE Ground Team type payments
+    //
+    // IMPORTANT: For NEGATIVE amounts (fund returns), always count them regardless of
+    // transferToWhom — admins often enter wrong type when recording a fund return.
+    // e.g. Niteesh returning ₹50k might have transferToWhom: "FSE Ground Team" by mistake.
     const receivedMap = {};
     filteredPayments.forEach(p => {
-      const n    = (p.transferTo    || '').trim();
-      const whom = (p.transferToWhom || '').trim();
+      const n      = (p.transferTo    || '').trim();
+      const whom   = (p.transferToWhom || '').trim();
+      const amount = p.amount || 0;
       if (!n || !whom) return;
       const role = nameRoleMap[n];
       if (!role) return;
-      // TL receives "TL's & Managers" payments, FSE receives "FSE Ground Team" payments
-      if ((role === "TL's & Managers" && whom === "TL's & Managers") ||
-          (role === "FSE Ground Team"  && whom === "FSE Ground Team")) {
-        receivedMap[n] = (receivedMap[n] || 0) + (p.amount || 0);
+
+      if (amount < 0) {
+        // Negative = fund return — always count for the person regardless of whom type
+        // (wrong whom type is common when recording returns)
+        receivedMap[n] = (receivedMap[n] || 0) + amount;
+      } else {
+        // Positive = normal payment — match role to whom type
+        if ((role === "TL's & Managers" && whom === "TL's & Managers") ||
+            (role === "FSE Ground Team"  && whom === "FSE Ground Team")) {
+          receivedMap[n] = (receivedMap[n] || 0) + amount;
+        }
       }
     });
 
     // sentMap: payments sent OUT by each TL to FSEs — month-scoped
-    // Only count payments where sender is a TL and receiver ≠ sender
+    // Only count POSITIVE outgoing (actual fund distribution), not returns
+    // Skip self-returns (transferTo === senderName with negative amount)
     const sentMap = {};
     filteredPayments.forEach(p => {
       const sender   = (p.senderName  || '').trim();
       const receiver = (p.transferTo  || '').trim();
       const whom     = (p.transferToWhom || '').trim();
+      const amount   = p.amount || 0;
       if (!sender || !receiver) return;
       // Skip VV/Admin originating payments — only TL outgoing
       if (['Admin', 'Accountant', 'VV', 'admin', 'accountant', 'vv'].includes(sender)) return;
       // Only count FSE-type outgoing (TL distributing to FSEs)
       if (whom !== "FSE Ground Team") return;
-      // Skip self-transfers
+      // Skip self-transfers (TL sending to themselves = self-keep)
       if (receiver.toLowerCase() === sender.toLowerCase()) return;
-      sentMap[sender] = (sentMap[sender] || 0) + (p.amount || 0);
+      // Only positive outgoing — negative means FSE returned fund to TL (reduces TL's sentToFSEs)
+      sentMap[sender] = (sentMap[sender] || 0) + amount;
     });
 
     // Also build a carryForward-aware net balance per TL using ALL payments (not just filtered)
