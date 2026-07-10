@@ -141,9 +141,14 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
       }
     }
 
-    // Sent: only TL outgoing to FSEs (FSE Ground Team type, not self-transfer, not VV/Admin)
+    // Sent: TL outgoing to others — count ALL outgoing (positive + negative recoveries)
+    // NOT just "FSE Ground Team" type — TLs also distribute to sub-TLs with "TL's & Managers" type
+    // Skip: VV/Admin sender, self-transfers
+    // The isTLMap check ensures only TL senders are tracked here
     if (sender && sender !== 'admin' && sender !== 'accountant' && sender !== 'vv' &&
-        receiver && receiver !== sender && whom === "FSE Ground Team") {
+        receiver && receiver !== sender &&
+        isTLMap[sender] === true) {
+      // Count all outgoing by TL senders (includes FSE distribution + sub-TL distribution)
       monthPayments[monthName].sent[sender] = (monthPayments[monthName].sent[sender] || 0) + amount;
     }
   });
@@ -445,23 +450,22 @@ router.get('/usage-summary', async (req, res) => {
       }
     });
 
-    // sentMap: payments sent OUT by each TL to FSEs — month-scoped
-    // Only count POSITIVE outgoing (actual fund distribution), not returns
-    // Skip self-returns (transferTo === senderName with negative amount)
+    // sentMap: payments sent OUT by each TL — month-scoped
+    // Count ALL TL outgoing (to FSEs + to sub-TLs), not just "FSE Ground Team" type
+    // This fixes TLs like Ravi Kumar who distribute via "TL's & Managers" type entries too
     const sentMap = {};
     filteredPayments.forEach(p => {
       const sender   = (p.senderName  || '').trim();
       const receiver = (p.transferTo  || '').trim();
-      const whom     = (p.transferToWhom || '').trim();
       const amount   = p.amount || 0;
       if (!sender || !receiver) return;
-      // Skip VV/Admin originating payments — only TL outgoing
+      // Skip VV/Admin originating payments
       if (['Admin', 'Accountant', 'VV', 'admin', 'accountant', 'vv'].includes(sender)) return;
-      // Only count FSE-type outgoing (TL distributing to FSEs)
-      if (whom !== "FSE Ground Team") return;
-      // Skip self-transfers (TL sending to themselves = self-keep)
+      // Skip self-transfers
       if (receiver.toLowerCase() === sender.toLowerCase()) return;
-      // Only positive outgoing — negative means FSE returned fund to TL (reduces TL's sentToFSEs)
+      // Only TL senders (authoritative from nameRoleMap)
+      if (nameRoleMap[sender] !== "TL's & Managers") return;
+      // Count all outgoing (positive = distributed, negative = recovered back)
       sentMap[sender] = (sentMap[sender] || 0) + amount;
     });
 
