@@ -862,10 +862,15 @@ export default function TLOverview() {
   }, []);
 
   const fetchTLs = async () => {
+    // Show cached instantly
+    const cached = localStorage.getItem('admin_tls');
+    if (cached) { try { setTls(JSON.parse(cached)); setLoading(false); } catch {} }
     setLoading(true);
     try {
       const res = await axios.get(`${API_URL}/tl`);
-      setTls(res.data.tls || []);
+      const tls = res.data.tls || [];
+      setTls(tls);
+      localStorage.setItem('admin_tls', JSON.stringify(tls));
     } catch (error) {
       console.error('Error fetching TLs:', error);
     } finally {
@@ -874,13 +879,18 @@ export default function TLOverview() {
   };
 
   const fetchAllMerchants = async () => {
+    const cacheKey = `admin_all_merchants_${selectedMonth}_${selectedYear}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) { try { setAllMerchantsData(JSON.parse(cached)); } catch {} }
     setMerchantsLoading(true);
     try {
       const params = new URLSearchParams();
       if (selectedMonth) params.set('selectedMonth', selectedMonth);
       if (selectedYear) params.set('selectedYear', selectedYear);
       const res = await axios.get(`${API_URL}/fse/merchants/all-details?${params}`);
-      setAllMerchantsData(res.data.merchants || []);
+      const merchants = res.data.merchants || [];
+      setAllMerchantsData(merchants);
+      localStorage.setItem(cacheKey, JSON.stringify(merchants));
     } catch (err) {
       console.error('Error fetching all merchants:', err);
     } finally {

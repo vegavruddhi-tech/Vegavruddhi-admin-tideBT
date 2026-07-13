@@ -255,14 +255,23 @@ export default function FSEOverview() {
   }, []);
 
   const fetchData = async () => {
-    setLoading(true);
+    // Show cached data instantly (stale-while-revalidate)
+    const cachedFSEs  = localStorage.getItem('admin_fses');
+    const cachedForms = localStorage.getItem('admin_forms');
+    if (cachedFSEs)  { try { setFses(JSON.parse(cachedFSEs));  setLoading(false); } catch {} }
+    if (cachedForms) { try { setAllForms(JSON.parse(cachedForms)); setLoading(false); } catch {} }
+
     try {
       const [fseRes, formsRes] = await Promise.all([
         axios.get(`${API_URL}/fse`),
         axios.get(`${API_URL}/forms?limit=5000`)
       ]);
-      setFses(fseRes.data.fses || []);
-      setAllForms(formsRes.data.forms || []);
+      const fses  = fseRes.data.fses   || [];
+      const forms = formsRes.data.forms || [];
+      setFses(fses);
+      setAllForms(forms);
+      localStorage.setItem('admin_fses',  JSON.stringify(fses));
+      localStorage.setItem('admin_forms', JSON.stringify(forms));
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -271,6 +280,16 @@ export default function FSEOverview() {
   };
 
   const fetchMerchantData = useCallback(async () => {
+    const cacheKey = `admin_merchants_${selectedMonth}_${selectedYear}`;
+    // Show cached instantly
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try {
+        const d = JSON.parse(cached);
+        setMerchantData(d.data || []);
+        if (d.collectionMonth) setBtMonth(d.collectionMonth);
+      } catch {}
+    }
     setMerchantLoading(true);
     try {
       const params = new URLSearchParams();
@@ -280,6 +299,8 @@ export default function FSEOverview() {
       setMerchantData(res.data.data || []);
       if (res.data.collectionMonth) setBtMonth(res.data.collectionMonth);
       else setBtMonth(selectedMonth || '');
+      // Cache for 5 minutes
+      localStorage.setItem(cacheKey, JSON.stringify({ data: res.data.data, collectionMonth: res.data.collectionMonth }));
     } catch (err) {
       console.error('Error fetching merchant data:', err);
     } finally {

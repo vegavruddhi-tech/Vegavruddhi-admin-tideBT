@@ -516,8 +516,6 @@ function App() {
 
           {/* ── PAGE CONTENT ─────────────────────────────────────── */}
           <Box
-            key={page}
-            className="page-enter"
             sx={{
               minHeight: "calc(100vh - 62px)",
               bgcolor: "background.default",
