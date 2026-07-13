@@ -549,15 +549,23 @@ router.get('/usage-summary', async (req, res) => {
     });
 
     let carryMap = {};
-    if (selectedMonth && selectedYear) {
-      carryMap = await computeCarryForward(
-        db, allCollections, allPayments, numToFSE, isTLMap,
-        selectedMonth, parseInt(selectedYear)
-      );
-      // Only keep carry-forward for active members
-      Object.keys(carryMap).forEach(k => {
-        if (!activeNames.has(k)) delete carryMap[k];
+    // ── Carry forward from TideBT_OpeningBalances ──────────────────────────
+    // Data is synced for July 2026 (carry forward from June).
+    // Only show carry forward for July — all other months show 0.
+    const OPENING_BALANCE_MONTH = 'July';
+    const OPENING_BALANCE_YEAR  = 2026;
+
+    if (selectedMonth === OPENING_BALANCE_MONTH && parseInt(selectedYear) === OPENING_BALANCE_YEAR) {
+      const openingBalances = await db.collection('TideBT_OpeningBalances').find({}).toArray();
+      openingBalances.forEach(b => {
+        const nameLower = (b.name || '').trim().toLowerCase();
+        if (nameLower && nameLower !== '0') {
+          carryMap[nameLower] = Math.round(b.openingBalance || 0);
+        }
       });
+      console.log(`[Carry Forward] Loaded ${Object.keys(carryMap).length} entries from TideBT_OpeningBalances for ${OPENING_BALANCE_MONTH} ${OPENING_BALANCE_YEAR}`);
+    } else {
+      console.log(`[Carry Forward] Month ${selectedMonth} ${selectedYear} — no opening balances synced, showing ₹0`);
     }
 
     // ── Calculate usage per person ─────────────────────────────────────────
@@ -580,7 +588,10 @@ router.get('/usage-summary', async (req, res) => {
       const carryFwd    = carryMap[nameLower] || 0;
 
       const totalUsed = usedRP + btFee + withdrawFee;
-      const effectiveReceived = isTL ? Math.max(0, received - sentToFSEs) : received;
+      // For TLs: effectiveReceived = received - sent to FSEs (NOT clamped to 0).
+      // Negative amounts (fund returns) must flow through so totalAvailable and fundLeft
+      // correctly reflect overdrawn/returned state. The frontend already shows "Overdrawn" badge.
+      const effectiveReceived = isTL ? received - sentToFSEs : received;
       const totalAvailable = effectiveReceived + carryFwd;
       const fundLeft  = totalAvailable - totalUsed;
 
@@ -656,6 +667,18 @@ router.post('/', async (req, res) => {
     res.json({ success: true, message: 'Payment recorded successfully', payment });
   } catch (error) {
     console.error('❌ Error recording fund transfer:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/fund-transfer/cache/bust — manually clear summary cache
+// Call this after running sync scripts (opening balances, BT data, etc.)
+router.post('/cache/bust', async (req, res) => {
+  try {
+    const db = req.db;
+    await bustCache(db);
+    res.json({ success: true, message: 'Summary cache cleared' });
+  } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });

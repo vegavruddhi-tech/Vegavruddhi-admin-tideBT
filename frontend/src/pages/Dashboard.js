@@ -473,6 +473,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [merchantsData, setMerchantsData] = useState([]);
   const [merchantsLoading, setMerchantsLoading] = useState(false);
+  // carryForwardMap: { nameLower → amount } from TideBT_OpeningBalances (July 2026 carry from June)
+  const [carryForwardMap, setCarryForwardMap] = useState({});
 
   // Date filters
   const [dateFilter, setDateFilter] = useState('all');
@@ -512,18 +514,29 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const [fseRes, tlRes, formsRes, paymentsRes, rpRes] = await Promise.all([
+      const [fseRes, tlRes, formsRes, paymentsRes, rpRes, cfRes] = await Promise.all([
         axios.get(`${API_URL}/fse`),
         axios.get(`${API_URL}/tl`),
         axios.get(`${API_URL}/forms?limit=5000`),
         axios.get(`${API_URL}/fund-transfer`).catch(() => ({ data: { transfers: [] } })),
-        axios.get(`${API_URL}/rp-audit`).catch(() => ({ data: { rawSubmissions: [] } }))
+        axios.get(`${API_URL}/rp-audit`).catch(() => ({ data: { rawSubmissions: [] } })),
+        // Fetch carry-forward balances from TideBT_OpeningBalances (July 2026 data)
+        axios.get(`${API_URL}/fund-transfer/usage-summary?selectedMonth=July&selectedYear=2026`)
+          .catch(() => ({ data: { summary: [] } }))
       ]);
       setFses(fseRes.data.fses || []);
       setTls(tlRes.data.tls || []);
       setAllForms(formsRes.data.forms || []);
       setPayments(paymentsRes.data.transfers || []);
       setRewardPassData(rpRes.data.rawSubmissions || []);
+      // Build carry-forward map: nameLower → carryForward amount
+      const cfMap = {};
+      (cfRes.data.summary || []).forEach(item => {
+        if (item.name && item.carryForward > 0) {
+          cfMap[item.name.toLowerCase().trim()] = item.carryForward;
+        }
+      });
+      setCarryForwardMap(cfMap);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -738,9 +751,6 @@ export default function Dashboard() {
       targetMonthIndex = now.getMonth();
     }
 
-    const lastMonthIndex = targetMonthIndex === 0 ? 11 : targetMonthIndex - 1;
-    const lastMonthYear = targetMonthIndex === 0 ? targetYear - 1 : targetYear;
-
     // Map FSE to TL (case-insensitive, fallback to partial matches)
     const fseToTL = {};
     fses.forEach(fse => {
@@ -783,7 +793,7 @@ export default function Dashboard() {
     // Initialize existing TLs
     tls.forEach(t => {
       if (t.name) {
-        tlData[t.name] = { name: t.name, currentFund: 0, lastMonthRemaining: 0, totalUsed: 0 };
+        tlData[t.name] = { name: t.name, currentFund: 0, lastMonthRemaining: 0 };
       }
     });
 
@@ -802,42 +812,42 @@ export default function Dashboard() {
     tlPayments.forEach(p => {
       const receiver = p.transferTo || 'Unknown';
       if (!tlData[receiver]) {
-        tlData[receiver] = { name: receiver, currentFund: 0, lastMonthRemaining: 0, totalUsed: 0 };
+        tlData[receiver] = { name: receiver, currentFund: 0, lastMonthRemaining: 0 };
       }
       
       const d = new Date(p.createdAt);
       if (isNaN(d)) return;
       if (d.getMonth() === targetMonthIndex && d.getFullYear() === targetYear) {
         tlData[receiver].currentFund += (p.amount || 0);
-      } else if (d.getMonth() === lastMonthIndex && d.getFullYear() === lastMonthYear) {
-        tlData[receiver].lastMonthRemaining += (p.amount || 0);
       }
     });
 
-    // Subtract used amounts from last month (from reward pass raw submissions data)
-    rewardPassData.forEach(rp => {
-      const d = new Date(rp.dateOfWorking || rp.createdAt);
-      if (isNaN(d)) return;
-      
-      if (d.getMonth() === lastMonthIndex && d.getFullYear() === lastMonthYear) {
-        const empName = rp.employeeName;
-        const tlName = getTLName(empName);
-        if (!tlData[tlName]) {
-          tlData[tlName] = { name: tlName, currentFund: 0, lastMonthRemaining: 0, totalUsed: 0 };
-        }
-        tlData[tlName].totalUsed += (rp.totalBTAmount || 0);
-      }
-    });
-
-    // Calculate last month remaining = last month fund - used
+    // ── Last Month Remaining: use TideBT_OpeningBalances (pre-synced carry-forward) ──
+    // This is more accurate than re-calculating from payments, which can produce negatives.
+    // carryForwardMap is keyed by nameLower → carry-forward amount from TideBT_OpeningBalances.
+    // For July 2026 (current month), carry-forward = June balance from the collection.
+    // For all other months carry-forward = 0 (not synced yet).
     Object.values(tlData).forEach(tl => {
-      tl.lastMonthRemaining = Math.max(0, tl.lastMonthRemaining - tl.totalUsed);
+      const nameLower = tl.name.toLowerCase().trim();
+      tl.lastMonthRemaining = carryForwardMap[nameLower] || 0;
+    });
+
+    // Also apply carry-forward for TLs found in carryForwardMap but not yet in tlData
+    Object.entries(carryForwardMap).forEach(([nameLower, cf]) => {
+      if (cf <= 0) return;
+      const existing = Object.keys(tlData).find(k => k.toLowerCase().trim() === nameLower);
+      if (!existing) {
+        // Find display name from tls list
+        const tlEntry = tls.find(t => (t.name || '').toLowerCase().trim() === nameLower);
+        const displayName = tlEntry ? tlEntry.name : nameLower;
+        tlData[displayName] = { name: displayName, currentFund: 0, lastMonthRemaining: cf };
+      }
     });
 
     return Object.values(tlData)
       .filter(t => t.currentFund > 0 || t.lastMonthRemaining > 0)
       .sort((a, b) => (b.currentFund + b.lastMonthRemaining) - (a.currentFund + a.lastMonthRemaining));
-  }, [payments, rewardPassData, fses, tls, selectedMonth, selectedYear]);
+  }, [payments, fses, tls, selectedMonth, selectedYear, carryForwardMap]);
 
   const handleCardClick = async (type) => {
     setDialogOpen(true);

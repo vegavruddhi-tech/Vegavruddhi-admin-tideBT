@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box, Typography, Card, CardContent, Button, TextField, MenuItem,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, CircularProgress, Alert, Grid, Autocomplete, Tabs, Tab
+  Chip, CircularProgress, Alert, Grid, Autocomplete, Tabs, Tab, Tooltip, IconButton
 } from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import DateFilter from '../components/DateFilter';
 import axios from 'axios';
 
@@ -45,6 +46,7 @@ export default function FundTransfer() {
   const [roleFilter, setRoleFilter] = useState('all');
   const [reportingPeriod, setReportingPeriod] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [bustingCache, setBustingCache] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -108,6 +110,32 @@ export default function FundTransfer() {
       console.error('Error fetching data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Bust summary cache and re-fetch — call after syncing new data (opening balances, BT sheets etc.)
+  const handleBustCache = async () => {
+    setBustingCache(true);
+    try {
+      await axios.post(`${API_URL}/fund-transfer/cache/bust`);
+      // Also bust FSE/TL caches
+      await axios.post(`${API_URL}/fse/cache/bust`).catch(() => {});
+      // Re-trigger summary fetch by bumping a dummy param
+      const params = new URLSearchParams();
+      if (dateFilter) params.set('dateFilter', dateFilter);
+      if (selectedYear) params.set('selectedYear', selectedYear);
+      if (selectedMonth) params.set('selectedMonth', selectedMonth);
+      if (dateFilter === 'custom' && fromDate) params.set('fromDate', fromDate);
+      if (dateFilter === 'custom' && toDate) params.set('toDate', toDate);
+      setSummaryLoading(true);
+      const res = await axios.get(`${API_URL}/fund-transfer/usage-summary?${params.toString()}`);
+      setUsageSummary(res.data.summary || []);
+      setReportingPeriod(res.data.reportingPeriod || '');
+    } catch (err) {
+      console.error('Cache bust failed:', err);
+    } finally {
+      setBustingCache(false);
+      setSummaryLoading(false);
     }
   };
 
@@ -475,6 +503,16 @@ export default function FundTransfer() {
                     size="small"
                     sx={{ bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 700, fontSize: 11, height: 22 }}
                   />
+                  <Tooltip title="Refresh carry-forward data (after syncing opening balances)">
+                    <IconButton
+                      size="small"
+                      onClick={handleBustCache}
+                      disabled={bustingCache || summaryLoading}
+                      sx={{ color: '#1a5c38', border: '1px solid #c8e6c9', borderRadius: 1.5, p: 0.5 }}
+                    >
+                      <RefreshIcon fontSize="small" sx={{ animation: bustingCache ? 'spin 1s linear infinite' : 'none', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} />
+                    </IconButton>
+                  </Tooltip>
                 </Box>
                 <Tabs
                   value={roleFilter}
@@ -562,9 +600,10 @@ export default function FundTransfer() {
                       </Typography>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {filteredUsageSummary.filter(item => item.type === "TL's & Managers").map((item, i) => {
-                          const selfKept = Math.max(0, item.received - (item.sentToFSEs || 0));
+                          // selfKept = received - distributed to FSEs (NOT clamped — negative means TL returned fund)
+                          const selfKept = item.received - (item.sentToFSEs || 0);
                           const fundLeft = item.fundLeft || 0;
-                          const totalAvail = item.totalAvailable || selfKept;
+                          const totalAvail = item.totalAvailable ?? selfKept;
                           return (
                             <Box key={i} sx={{ border: '1.5px solid #c8e6c9', borderRadius: 2, overflow: 'hidden' }}>
                               {/* Header */}
@@ -605,9 +644,11 @@ export default function FundTransfer() {
                                     <Typography fontSize={18} fontWeight={800} color="#1565c0">₹{(item.sentToFSEs || 0).toLocaleString()}</Typography>
                                   </Box>
                                   <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, color: '#aaa', fontSize: 18 }}>→</Box>
-                                  <Box sx={{ flex: 1, minWidth: 110, background: '#fff8e1', borderRadius: '0 10px 10px 0', px: 2, py: 1.5 }}>
-                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Kept for Self</Typography>
-                                    <Typography fontSize={18} fontWeight={800} color="#f57f17">₹{selfKept.toLocaleString()}</Typography>
+                                  <Box sx={{ flex: 1, minWidth: 110, background: selfKept < 0 ? '#fdecea' : '#fff8e1', borderRadius: '0 10px 10px 0', px: 2, py: 1.5 }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">
+                                      {selfKept < 0 ? 'Net Return (After Dist.)' : 'Kept for Self'}
+                                    </Typography>
+                                    <Typography fontSize={18} fontWeight={800} color={selfKept < 0 ? '#c62828' : '#f57f17'}>₹{selfKept.toLocaleString()}</Typography>
                                     <Typography fontSize={8} color="text.secondary">Received − Distributed</Typography>
                                   </Box>
                                 </Box>
@@ -617,9 +658,11 @@ export default function FundTransfer() {
                                   💰 Personal Fund (Kept for Self)
                                 </Typography>
                                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 1 }}>
-                                  <Box sx={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
-                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Self Kept</Typography>
-                                    <Typography fontSize={13} fontWeight={800} color="#f57f17">₹{selfKept.toLocaleString()}</Typography>
+                                  <Box sx={{ background: selfKept < 0 ? '#fdecea' : '#fff8e1', border: `1px solid ${selfKept < 0 ? '#ef9a9a' : '#ffe082'}`, borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">
+                                      {selfKept < 0 ? 'Net Return' : 'Self Kept'}
+                                    </Typography>
+                                    <Typography fontSize={13} fontWeight={800} color={selfKept < 0 ? '#c62828' : '#f57f17'}>₹{selfKept.toLocaleString()}</Typography>
                                   </Box>
                                   <Box sx={{ background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
                                     <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">+ Carry Fwd</Typography>
