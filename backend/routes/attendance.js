@@ -50,8 +50,10 @@ router.get('/admin/all', async (req, res) => {
     const allPersons = Object.values(personMap);
     const allNames   = allPersons.map(p => p.name);
 
-    // Step 2: Fetch attendance for those names — ONLY from TideBT logins
-    const query = { source: { $in: ['tidebt-employee', 'tidebt-tl'] } };
+    // Step 2: Fetch attendance for those names — from TideBT logins OR any source
+    // Note: some records may have source=undefined (from non-TideBT logins on same day)
+    // We include them if the person is in TideBT_Access and logged in today
+    const query = { date: today || new Date().toISOString().split('T')[0] };
     if (date) query.date = date;
     if (allNames.length > 0) {
       query.userName = { $in: allNames.map(n => new RegExp(`^\\s*${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')) };
@@ -113,7 +115,7 @@ router.get('/admin/summary', async (req, res) => {
     tlNameSet.forEach(n => allNamesSet.add(n));
     const allNames = [...allNamesSet];
 
-    const query = { source: { $in: ['tidebt-employee', 'tidebt-tl'] } };
+    const query = {};
     if (date) query.date = date;
     if (allNames.length > 0) {
       query.userName = { $in: allNames.map(n => new RegExp(`^\\s*${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')) };
