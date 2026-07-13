@@ -50,11 +50,10 @@ router.get('/admin/all', async (req, res) => {
     const allPersons = Object.values(personMap);
     const allNames   = allPersons.map(p => p.name);
 
-    // Step 2: Fetch attendance for those names — from TideBT logins OR any source
+    // Step 2: Fetch attendance for those names — from any source
     // Note: some records may have source=undefined (from non-TideBT logins on same day)
-    // We include them if the person is in TideBT_Access and logged in today
-    const query = { date: today || new Date().toISOString().split('T')[0] };
-    if (date) query.date = date;
+    const queryDate = date || new Date().toISOString().split('T')[0];
+    const query = { date: queryDate };
     if (allNames.length > 0) {
       query.userName = { $in: allNames.map(n => new RegExp(`^\\s*${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')) };
     }
@@ -71,7 +70,7 @@ router.get('/admin/all', async (req, res) => {
           userName:         person.name,
           userType:         person.userType,
           status:           'absent',
-          date:             date || new Date().toISOString().split('T')[0],
+          date:             queryDate,
           tlName:           person.tlName,
           reportingManager: person.reportingManager,
         });
