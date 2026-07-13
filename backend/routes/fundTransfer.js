@@ -457,12 +457,13 @@ router.get('/usage-summary', async (req, res) => {
     // ── Build received map and sent map — both from filteredPayments (month-scoped) ──
     // receivedMap: net received per person in the filtered period
     // For TLs: count TL's & Managers type payments (positive and negative/reversals)
-    // For FSEs: count FSE Ground Team type payments
-    //
-    // IMPORTANT: For NEGATIVE amounts (fund returns), always count them regardless of
-    // transferToWhom — admins often enter wrong type when recording a fund return.
-    // e.g. Niteesh returning ₹50k might have transferToWhom: "FSE Ground Team" by mistake.
-    const receivedMap = {};
+    // receivedMap: POSITIVE payments only — what was actually given to each person
+    // deductionMap: absolute value of NEGATIVE payments — fund returns/deductions
+    // These are kept separate so:
+    //   Fund Left = carryForward + received - deductions - BT/RP costs
+    // NOT: received = net (positive + negative) which makes received go negative
+    const receivedMap   = {};
+    const deductionMap  = {}; // stores absolute value of negatives
     filteredPayments.forEach(p => {
       const n      = (p.transferTo    || '').trim();
       const whom   = (p.transferToWhom || '').trim();
@@ -472,9 +473,9 @@ router.get('/usage-summary', async (req, res) => {
       if (!role) return;
 
       if (amount < 0) {
-        // Negative = fund return — always count for the person regardless of whom type
-        // (wrong whom type is common when recording returns)
-        receivedMap[n] = (receivedMap[n] || 0) + amount;
+        // Negative = fund deduction/return — always count regardless of whom type
+        // (admins often enter wrong type when recording a return)
+        deductionMap[n] = (deductionMap[n] || 0) + Math.abs(amount);
       } else {
         // Positive = normal payment — match role to whom type
         if ((role === "TL's & Managers" && whom === "TL's & Managers") ||
@@ -583,22 +584,27 @@ router.get('/usage-summary', async (req, res) => {
       const withdrawAmount = withdrawMap[nameLower] || 0;
       const withdrawFee    = Math.round(withdrawAmount * 0.03 * 100) / 100;
 
-      const received    = receivedMap[name] || 0;
+      // received = positive payments only
+      // deduction = absolute value of negative payments (fund returns/recoveries)
+      const received    = receivedMap[name]  || 0;
+      const deduction   = deductionMap[name] || 0;
       const sentToFSEs  = isTL ? (sentMap[name] || 0) : 0;
       const carryFwd    = carryMap[nameLower] || 0;
 
+      // totalAvailable = carryForward + received (positive only)
+      // For TL: also subtract what they sent to FSEs from received
+      const effectiveReceived = isTL ? Math.max(0, received - sentToFSEs) : received;
+      const totalAvailable = carryFwd + effectiveReceived;
+
+      // Fund Left = totalAvailable - deductions (returns) - BT/RP costs
       const totalUsed = usedRP + btFee + withdrawFee;
-      // For TLs: effectiveReceived = received - sent to FSEs (NOT clamped to 0).
-      // Negative amounts (fund returns) must flow through so totalAvailable and fundLeft
-      // correctly reflect overdrawn/returned state. The frontend already shows "Overdrawn" badge.
-      const effectiveReceived = isTL ? received - sentToFSEs : received;
-      const totalAvailable = effectiveReceived + carryFwd;
-      const fundLeft  = totalAvailable - totalUsed;
+      const fundLeft  = totalAvailable - deduction - totalUsed;
 
       return {
         name,
         type: nameRoleMap[name],
         received,
+        deduction,
         carryForward: carryFwd,
         totalAvailable,
         sentToFSEs,

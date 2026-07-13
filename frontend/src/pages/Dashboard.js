@@ -529,10 +529,11 @@ export default function Dashboard() {
       setAllForms(formsRes.data.forms || []);
       setPayments(paymentsRes.data.transfers || []);
       setRewardPassData(rpRes.data.rawSubmissions || []);
-      // Build carry-forward map: nameLower → carryForward amount
+      // Build carry-forward map: nameLower → carryForward amount — TLs only for the chart
+      // (usage-summary has both TL and FSE entries; FSE carry is handled separately)
       const cfMap = {};
       (cfRes.data.summary || []).forEach(item => {
-        if (item.name && item.carryForward > 0) {
+        if (item.name && (item.carryForward || 0) > 0 && item.type === "TL's & Managers") {
           cfMap[item.name.toLowerCase().trim()] = item.carryForward;
         }
       });
@@ -797,47 +798,55 @@ export default function Dashboard() {
       }
     });
 
-    // Only show payments sent to TLs & Managers (use raw payments unfiltered by selected date)
-    const tlPayments = payments.filter(p => {
-      if (p.transferToWhom) {
-        return p.transferToWhom === "TL's & Managers";
-      }
-      // Fallback: check if the receiver's name matches a TL name directly (case-insensitive)
-      const receiver = (p.transferTo || '').toLowerCase().trim();
-      if (tlNames.has(receiver)) return true;
-      const partialTLKey = [...tlNames].find(k => k.includes(receiver) || receiver.includes(k));
-      return !!partialTLKey;
-    });
+    // Only sum payments where transferToWhom is explicitly "TL's & Managers"
+    // Do NOT use name-based fallback — Niteesh Kumar Saroj is both TL and FSE,
+    // so name matching would incorrectly pull in his FSE-type payments too.
+    const tlPayments = payments.filter(p =>
+      (p.transferToWhom || '').trim() === "TL's & Managers"
+    );
     
     tlPayments.forEach(p => {
       const receiver = p.transferTo || 'Unknown';
       if (!tlData[receiver]) {
-        tlData[receiver] = { name: receiver, currentFund: 0, lastMonthRemaining: 0 };
+        tlData[receiver] = { name: receiver, currentFund: 0, currentDeduction: 0, lastMonthRemaining: 0 };
       }
       
       const d = new Date(p.createdAt);
       if (isNaN(d)) return;
       if (d.getMonth() === targetMonthIndex && d.getFullYear() === targetYear) {
-        tlData[receiver].currentFund += (p.amount || 0);
+        const amount = p.amount || 0;
+        if (amount >= 0) {
+          // Positive = fund received this month
+          tlData[receiver].currentFund += amount;
+        } else {
+          // Negative = fund deducted/returned — track separately
+          tlData[receiver].currentDeduction = (tlData[receiver].currentDeduction || 0) + Math.abs(amount);
+        }
       }
     });
 
+    // Net this-month bar = received - deductions (never below 0 for chart display)
+    Object.values(tlData).forEach(tl => {
+      tl.currentFund = Math.max(0, tl.currentFund - (tl.currentDeduction || 0));
+    });
+
     // ── Last Month Remaining: use TideBT_OpeningBalances (pre-synced carry-forward) ──
-    // This is more accurate than re-calculating from payments, which can produce negatives.
-    // carryForwardMap is keyed by nameLower → carry-forward amount from TideBT_OpeningBalances.
-    // For July 2026 (current month), carry-forward = June balance from the collection.
-    // For all other months carry-forward = 0 (not synced yet).
+    // Only apply to TLs — carryForwardMap contains both TL and FSE entries from usage-summary.
+    // This chart is TL-only so we must filter strictly to known TL names.
     Object.values(tlData).forEach(tl => {
       const nameLower = tl.name.toLowerCase().trim();
       tl.lastMonthRemaining = carryForwardMap[nameLower] || 0;
     });
 
-    // Also apply carry-forward for TLs found in carryForwardMap but not yet in tlData
+    // Also apply carry-forward for TLs in carryForwardMap that have no payments this month
+    // BUT only if the name is in the known TL list — never add FSE names to this chart
+    const tlNamesLower = new Set(tls.map(t => (t.name || '').toLowerCase().trim()));
     Object.entries(carryForwardMap).forEach(([nameLower, cf]) => {
       if (cf <= 0) return;
+      // Skip FSEs — only TL names allowed in this chart
+      if (!tlNamesLower.has(nameLower)) return;
       const existing = Object.keys(tlData).find(k => k.toLowerCase().trim() === nameLower);
       if (!existing) {
-        // Find display name from tls list
         const tlEntry = tls.find(t => (t.name || '').toLowerCase().trim() === nameLower);
         const displayName = tlEntry ? tlEntry.name : nameLower;
         tlData[displayName] = { name: displayName, currentFund: 0, lastMonthRemaining: cf };

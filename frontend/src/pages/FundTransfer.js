@@ -600,8 +600,9 @@ export default function FundTransfer() {
                       </Typography>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {filteredUsageSummary.filter(item => item.type === "TL's & Managers").map((item, i) => {
-                          // selfKept = received - distributed to FSEs (NOT clamped — negative means TL returned fund)
-                          const selfKept = item.received - (item.sentToFSEs || 0);
+                          // received = positive only; deduction = fund returned/recovered
+                          const selfKept = Math.max(0, item.received - (item.sentToFSEs || 0));
+                          const deduction = item.deduction || 0;
                           const fundLeft = item.fundLeft || 0;
                           const totalAvail = item.totalAvailable ?? selfKept;
                           return (
@@ -631,12 +632,9 @@ export default function FundTransfer() {
                                   📅 This Month ({selectedMonth} {selectedYear})
                                 </Typography>
                                 <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0, mb: 2, flexWrap: 'wrap' }}>
-                                  <Box sx={{ flex: 1, minWidth: 110, background: item.received < 0 ? '#fdecea' : '#e8f5e9', borderRadius: '10px 0 0 10px', px: 2, py: 1.5, borderRight: '2px dashed #a5d6a7' }}>
-                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">
-                                      {item.received < 0 ? 'Returned to Admin' : 'Received from VV'}
-                                    </Typography>
-                                    <Typography fontSize={18} fontWeight={800} color={item.received < 0 ? '#c62828' : '#2e7d32'}>₹{item.received.toLocaleString()}</Typography>
-                                    {item.received < 0 && <Typography fontSize={8} sx={{ color: '#c62828', mt: 0.5 }}>Net return this month</Typography>}
+                                  <Box sx={{ flex: 1, minWidth: 110, background: '#e8f5e9', borderRadius: '10px 0 0 10px', px: 2, py: 1.5, borderRight: '2px dashed #a5d6a7' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Received from VV</Typography>
+                                    <Typography fontSize={18} fontWeight={800} color="#2e7d32">₹{(item.received || 0).toLocaleString()}</Typography>
                                   </Box>
                                   <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, color: '#aaa', fontSize: 18 }}>→</Box>
                                   <Box sx={{ flex: 1, minWidth: 110, background: '#e3f2fd', px: 2, py: 1.5, borderRight: '2px dashed #90caf9' }}>
@@ -644,25 +642,21 @@ export default function FundTransfer() {
                                     <Typography fontSize={18} fontWeight={800} color="#1565c0">₹{(item.sentToFSEs || 0).toLocaleString()}</Typography>
                                   </Box>
                                   <Box sx={{ display: 'flex', alignItems: 'center', px: 0.5, color: '#aaa', fontSize: 18 }}>→</Box>
-                                  <Box sx={{ flex: 1, minWidth: 110, background: selfKept < 0 ? '#fdecea' : '#fff8e1', borderRadius: '0 10px 10px 0', px: 2, py: 1.5 }}>
-                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">
-                                      {selfKept < 0 ? 'Net Return (After Dist.)' : 'Kept for Self'}
-                                    </Typography>
-                                    <Typography fontSize={18} fontWeight={800} color={selfKept < 0 ? '#c62828' : '#f57f17'}>₹{selfKept.toLocaleString()}</Typography>
+                                  <Box sx={{ flex: 1, minWidth: 110, background: '#fff8e1', borderRadius: '0 10px 10px 0', px: 2, py: 1.5 }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Kept for Self</Typography>
+                                    <Typography fontSize={18} fontWeight={800} color="#f57f17">₹{selfKept.toLocaleString()}</Typography>
                                     <Typography fontSize={8} color="text.secondary">Received − Distributed</Typography>
                                   </Box>
                                 </Box>
 
                                 {/* Row 2: Personal fund breakdown */}
                                 <Typography fontSize={9} fontWeight={700} color="text.secondary" textTransform="uppercase" letterSpacing={1} mb={0.75}>
-                                  💰 Personal Fund (Kept for Self)
+                                  💰 Personal Fund
                                 </Typography>
                                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 1 }}>
-                                  <Box sx={{ background: selfKept < 0 ? '#fdecea' : '#fff8e1', border: `1px solid ${selfKept < 0 ? '#ef9a9a' : '#ffe082'}`, borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
-                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">
-                                      {selfKept < 0 ? 'Net Return' : 'Self Kept'}
-                                    </Typography>
-                                    <Typography fontSize={13} fontWeight={800} color={selfKept < 0 ? '#c62828' : '#f57f17'}>₹{selfKept.toLocaleString()}</Typography>
+                                  <Box sx={{ background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                    <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">Self Kept</Typography>
+                                    <Typography fontSize={13} fontWeight={800} color="#f57f17">₹{selfKept.toLocaleString()}</Typography>
                                   </Box>
                                   <Box sx={{ background: '#e8f5e9', border: '1px solid #a5d6a7', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
                                     <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">+ Carry Fwd</Typography>
@@ -673,6 +667,13 @@ export default function FundTransfer() {
                                     <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">= Available</Typography>
                                     <Typography fontSize={13} fontWeight={800} color="#1b5e20">₹{totalAvail.toLocaleString()}</Typography>
                                   </Box>
+                                  {deduction > 0 && (
+                                    <Box sx={{ background: '#fdecea', border: '1px solid #ef9a9a', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
+                                      <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">− Deductions</Typography>
+                                      <Typography fontSize={13} fontWeight={800} color="#c62828">₹{deduction.toLocaleString()}</Typography>
+                                      <Typography fontSize={8} color="text.secondary">Fund returned/recovered</Typography>
+                                    </Box>
+                                  )}
                                   <Box sx={{ background: '#fff3e0', border: '1px solid #ffcc80', borderRadius: 1.5, px: 1.5, py: 1, textAlign: 'center' }}>
                                     <Typography fontSize={9} color="text.secondary" fontWeight={600} textTransform="uppercase">BT Done</Typography>
                                     <Typography fontSize={13} fontWeight={800} color="#e65100">₹{(item.usedBT || 0).toLocaleString()}</Typography>
@@ -725,6 +726,7 @@ export default function FundTransfer() {
                               <TableCell align="center">Received</TableCell>
                               <TableCell align="center" sx={{ color: '#2e7d32' }}>Carry Fwd</TableCell>
                               <TableCell align="center" sx={{ color: '#1b5e20' }}>Total Avail</TableCell>
+                              <TableCell align="center" sx={{ color: '#c62828' }}>Deducted</TableCell>
                               <TableCell align="center">BT Done</TableCell>
                               <TableCell align="center">RP #</TableCell>
                               <TableCell align="center">RP Cost</TableCell>
@@ -738,9 +740,12 @@ export default function FundTransfer() {
                             {filteredUsageSummary.filter(item => item.type === "FSE Ground Team").map((item, i) => (
                               <TableRow key={i} hover>
                                 <TableCell sx={{ fontWeight: 600 }}>{item.name}</TableCell>
-                                <TableCell align="center" sx={{ fontWeight: 700, color: '#2e7d32' }}>₹{item.received?.toLocaleString()}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#2e7d32' }}>₹{(item.received || 0).toLocaleString()}</TableCell>
                                 <TableCell align="center" sx={{ fontWeight: 700, color: '#388e3c' }}>₹{(item.carryForward || 0).toLocaleString()}</TableCell>
                                 <TableCell align="center" sx={{ fontWeight: 700, color: '#1b5e20' }}>₹{(item.totalAvailable || 0).toLocaleString()}</TableCell>
+                                <TableCell align="center" sx={{ fontWeight: 700, color: '#c62828' }}>
+                                  {(item.deduction || 0) > 0 ? `−₹${(item.deduction || 0).toLocaleString()}` : '₹0'}
+                                </TableCell>
                                 <TableCell align="center" sx={{ fontWeight: 700, color: '#e65100' }}>₹{(item.usedBT || 0).toLocaleString()}</TableCell>
                                 <TableCell align="center" sx={{ fontWeight: 700, color: '#0369a1' }}>{item.rpCount || 0}</TableCell>
                                 <TableCell align="center" sx={{ fontWeight: 700, color: '#7c3aed' }}>₹{(item.usedRP || 0).toLocaleString()}</TableCell>
