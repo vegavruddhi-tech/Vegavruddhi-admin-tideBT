@@ -278,16 +278,6 @@ export default function FSEOverview() {
   };
 
   const fetchMerchantData = useCallback(async () => {
-    const cacheKey = `admin_merchants_${selectedMonth}_${selectedYear}`;
-    // Show cached instantly
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-      try {
-        const d = JSON.parse(cached);
-        setMerchantData(d.data || []);
-        if (d.collectionMonth) setBtMonth(d.collectionMonth);
-      } catch {}
-    }
     setMerchantLoading(true);
     try {
       const params = new URLSearchParams();
@@ -297,8 +287,6 @@ export default function FSEOverview() {
       setMerchantData(res.data.data || []);
       if (res.data.collectionMonth) setBtMonth(res.data.collectionMonth);
       else setBtMonth(selectedMonth || '');
-      // Cache for 5 minutes
-      localStorage.setItem(cacheKey, JSON.stringify({ data: res.data.data, collectionMonth: res.data.collectionMonth }));
     } catch (err) {
       console.error('Error fetching merchant data:', err);
     } finally {

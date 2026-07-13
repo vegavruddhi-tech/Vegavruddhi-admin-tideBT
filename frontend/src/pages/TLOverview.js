@@ -879,18 +879,14 @@ export default function TLOverview() {
   };
 
   const fetchAllMerchants = async () => {
-    const cacheKey = `admin_all_merchants_${selectedMonth}_${selectedYear}`;
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) { try { setAllMerchantsData(JSON.parse(cached)); } catch {} }
+    // all-details is too large for localStorage — fetch fresh each time
     setMerchantsLoading(true);
     try {
       const params = new URLSearchParams();
       if (selectedMonth) params.set('selectedMonth', selectedMonth);
       if (selectedYear) params.set('selectedYear', selectedYear);
       const res = await axios.get(`${API_URL}/fse/merchants/all-details?${params}`);
-      const merchants = res.data.merchants || [];
-      setAllMerchantsData(merchants);
-      localStorage.setItem(cacheKey, JSON.stringify(merchants));
+      setAllMerchantsData(res.data.merchants || []);
     } catch (err) {
       console.error('Error fetching all merchants:', err);
     } finally {
