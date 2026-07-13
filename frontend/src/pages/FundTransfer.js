@@ -77,17 +77,13 @@ export default function FundTransfer() {
   }, [dateFilter, selectedYear, selectedMonth, fromDate, toDate]);
 
   const fetchData = async () => {
-    // Show cached data instantly
+    // Show cached data instantly for FSEs/TLs only (payments too large for localStorage)
     try {
-      const cachedFSEs     = localStorage.getItem('admin_fses');
-      const cachedTLs      = localStorage.getItem('admin_tls');
-      const cachedPayments = localStorage.getItem('admin_payments');
-      const cachedForms    = localStorage.getItem('admin_mk_forms');
-      if (cachedFSEs)     setFses(JSON.parse(cachedFSEs));
-      if (cachedTLs)      setTls(JSON.parse(cachedTLs));
-      if (cachedPayments) setPayments(JSON.parse(cachedPayments));
-      if (cachedForms)    setMobikwikForms(JSON.parse(cachedForms));
-      if (cachedFSEs || cachedPayments) setLoading(false);
+      const cachedFSEs  = localStorage.getItem('admin_fses');
+      const cachedTLs   = localStorage.getItem('admin_tls');
+      if (cachedFSEs) setFses(JSON.parse(cachedFSEs));
+      if (cachedTLs)  setTls(JSON.parse(cachedTLs));
+      if (cachedFSEs) setLoading(false);
     } catch {}
 
     try {
@@ -97,18 +93,17 @@ export default function FundTransfer() {
         axios.get(`${API_URL}/fund-transfer`).catch(() => ({ data: { transfers: [] } })),
         axios.get(`${API_URL}/forms?limit=5000`).catch(() => ({ data: { forms: [] } }))
       ]);
-      const fses     = fseRes.data.fses   || [];
-      const tls      = tlRes.data.tls     || [];
-      const payments = paymentsRes.data.transfers || [];
-      const mkForms  = (formsRes.data.forms || []).filter(f => f.formType === 'mobikwik-withdraw');
+      const fses    = fseRes.data.fses   || [];
+      const tls     = tlRes.data.tls     || [];
+      const allPayments = paymentsRes.data.transfers || [];
+      const mkForms = (formsRes.data.forms || []).filter(f => f.formType === 'mobikwik-withdraw');
       setFses(fses);
       setTls(tls);
-      setPayments(payments);
+      setPayments(allPayments);
       setMobikwikForms(mkForms);
-      localStorage.setItem('admin_fses',      JSON.stringify(fses));
-      localStorage.setItem('admin_tls',       JSON.stringify(tls));
-      localStorage.setItem('admin_payments',  JSON.stringify(payments));
-      localStorage.setItem('admin_mk_forms',  JSON.stringify(mkForms));
+      // Only cache small data in localStorage
+      try { localStorage.setItem('admin_fses', JSON.stringify(fses)); } catch {}
+      try { localStorage.setItem('admin_tls',  JSON.stringify(tls));  } catch {}
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {

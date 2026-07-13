@@ -255,11 +255,9 @@ export default function FSEOverview() {
   }, []);
 
   const fetchData = async () => {
-    // Show cached data instantly (stale-while-revalidate)
-    const cachedFSEs  = localStorage.getItem('admin_fses');
-    const cachedForms = localStorage.getItem('admin_forms');
-    if (cachedFSEs)  { try { setFses(JSON.parse(cachedFSEs));  setLoading(false); } catch {} }
-    if (cachedForms) { try { setAllForms(JSON.parse(cachedForms)); setLoading(false); } catch {} }
+    // Show cached FSEs instantly (forms too large for localStorage)
+    const cachedFSEs = localStorage.getItem('admin_fses');
+    if (cachedFSEs) { try { setFses(JSON.parse(cachedFSEs)); setLoading(false); } catch {} }
 
     try {
       const [fseRes, formsRes] = await Promise.all([
@@ -270,8 +268,8 @@ export default function FSEOverview() {
       const forms = formsRes.data.forms || [];
       setFses(fses);
       setAllForms(forms);
-      localStorage.setItem('admin_fses',  JSON.stringify(fses));
-      localStorage.setItem('admin_forms', JSON.stringify(forms));
+      try { localStorage.setItem('admin_fses', JSON.stringify(fses)); } catch {}
+      // Don't cache forms — too large
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
