@@ -350,7 +350,11 @@ export default function FSEOverview() {
     setExpandedFSE(null);
     setKpiDialog(null);
     setAllMerchantsData([]); // reset all-details cache
-  }, [selectedMonth, selectedYear]);
+    // Immediately re-fetch merchant summary if in merchants view
+    if (viewMode === 'merchants') {
+      fetchMerchantData();
+    }
+  }, [selectedMonth, selectedYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (viewMode === 'merchants') fetchMerchantData();
