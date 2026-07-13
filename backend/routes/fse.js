@@ -2,6 +2,30 @@ const express = require('express');
 const router = express.Router();
 const { cacheGet, cacheSet, cacheKey, cacheInvalidate } = require('../utils/cache');
 
+// Helper: find BT_TL_CONNECT collection, preferring canonical uppercase+space format
+// e.g. "BT_TL_CONNECT FEB" over "bt_tl_connect_feb" (which may be old/empty)
+function findBTCollection(allCollections, selectedMonth, selectedYear) {
+  if (!selectedMonth) return null;
+  const btCollections = allCollections
+    .filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'))
+    .sort((a, b) => {
+      // Prefer space-separated uppercase names (canonical format with actual data)
+      const aScore = (a.includes(' ') ? 2 : 0) + (a === a.toUpperCase() ? 1 : 0);
+      const bScore = (b.includes(' ') ? 2 : 0) + (b === b.toUpperCase() ? 1 : 0);
+      return bScore - aScore;
+    });
+  const mu = selectedMonth.toUpperCase();
+  const ABBR = { 'JANUARY':'JAN','FEBRUARY':'FEB','MARCH':'MAR','APRIL':'APR','MAY':'MAY','JUNE':'JUN','JULY':'JUL','AUGUST':'AUG','SEPTEMBER':'SEP','OCTOBER':'OCT','NOVEMBER':'NOV','DECEMBER':'DEC' };
+  const abbr = ABBR[mu] || mu;
+  const matchesMonth = (cu) => cu.includes(mu) || cu.includes(abbr);
+  if (selectedYear) {
+    const yr = String(selectedYear); const sy = yr.slice(-2);
+    const m = btCollections.find(c => { const cu = c.toUpperCase(); return matchesMonth(cu) && (cu.includes(yr) || cu.includes(sy)); });
+    if (m) return m;
+  }
+  return btCollections.find(c => matchesMonth(c.toUpperCase())) || null;
+}
+
 // GET /api/fse - Get all FSEs with Tide BT access
 router.get('/', async (req, res) => {
   try {
@@ -73,18 +97,9 @@ router.get('/merchants/all', async (req, res) => {
     const tlMap = {};
     accessList.forEach(a => { if (a.fseName) tlMap[a.fseName] = a.tlName || '–'; });
 
-    // Step 2: BT collection — only use BT_TL_CONNECT* collections
+    // Step 2: BT collection — use helper that prefers canonical uppercase+space format
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
-    const btCollections = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
-    let btCollectionName = null;
-    if (selectedMonth) {
-      const mu = selectedMonth.toUpperCase();
-      if (selectedYear) {
-        const yr = String(selectedYear); const sy = yr.slice(-2);
-        btCollectionName = btCollections.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) && (cu.includes(yr) || cu.includes(sy)); }) || null;
-      }
-      if (!btCollectionName) btCollectionName = btCollections.find(c => c.toUpperCase().includes(mu)) || null;
-    }
+    const btCollectionName = findBTCollection(allCollections, selectedMonth, selectedYear);
 
     // Step 3: bt_master — count merchants per FSE + get all numbers
     const masterDocs = await db.collection('bt_master').find(
@@ -177,15 +192,9 @@ router.get('/merchants/all-details', async (req, res) => {
     }
     console.log(`[Cache MISS] ${ck}`);
 
-    // BT collection — only use BT_TL_CONNECT* collections
+    // BT collection — use helper that prefers canonical uppercase+space format
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
-    const btCollections = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
-    let btCollectionName = null;
-    if (selectedMonth) {
-      const mu = selectedMonth.toUpperCase();
-      if (selectedYear) { const yr = String(selectedYear); const sy = yr.slice(-2); btCollectionName = btCollections.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) && (cu.includes(yr)||cu.includes(sy)); }) || null; }
-      if (!btCollectionName) btCollectionName = btCollections.find(c => c.toUpperCase().includes(mu)) || null;
-    }
+    const btCollectionName = findBTCollection(allCollections, selectedMonth, selectedYear);
 
     // Get ALL merchants from bt_master in ONE query
     const masterDocs = await db.collection('bt_master').find(
@@ -294,15 +303,9 @@ router.get('/merchants/:fseName', async (req, res) => {
     }
     console.log(`[Cache MISS] ${ck}`);
 
-    // BT collection — only use BT_TL_CONNECT* collections
+    // BT collection — use helper that prefers canonical uppercase+space format
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
-    const btCollections = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
-    let btCollectionName = null;
-    if (selectedMonth) {
-      const mu = selectedMonth.toUpperCase();
-      if (selectedYear) { const yr = String(selectedYear); const sy = yr.slice(-2); btCollectionName = btCollections.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) && (cu.includes(yr)||cu.includes(sy)); }) || null; }
-      if (!btCollectionName) btCollectionName = btCollections.find(c => c.toUpperCase().includes(mu)) || null;
-    }
+    const btCollectionName = findBTCollection(allCollections, selectedMonth, selectedYear);
 
     // Get merchants for this FSE from bt_master
     const masterDocs = await db.collection('bt_master').find(
