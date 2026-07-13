@@ -8,13 +8,49 @@ router.get('/admin/all', async (req, res) => {
     const db = req.db;
     const { date } = req.query;
 
-    // Step 1: Get all TideBT FSE and TL names
+    // Step 1: Get all TideBT FSE and TL names from TideBT_Access
     const accessList = await db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray();
-    const fseNames = [...new Set(accessList.map(a => (a.fseName || '').trim()).filter(Boolean))];
-    const tlNames  = [...new Set(accessList.map(a => (a.tlName  || '').trim()).filter(Boolean))];
-    const allNames = [...new Set([...fseNames, ...tlNames])];
+    const fseNameSet = new Set(accessList.map(a => (a.fseName || '').trim()).filter(Boolean));
+    const tlNameSet  = new Set(accessList.map(a => (a.tlName  || '').trim()).filter(Boolean));
 
-    // Step 2: Fetch attendance for those names on that date — ONLY from TideBT logins
+    // Build person map — each person with their primary role
+    // If someone is BOTH fseName and tlName → show as 'teamlead' (TL takes priority for attendance display)
+    // But keep ONE record per person (no duplicates)
+    const personMap = {}; // nameLower → { name, userType, tlName, reportingManager }
+
+    // Add FSEs first
+    accessList.forEach(a => {
+      const fseName = (a.fseName || '').trim();
+      if (!fseName) return;
+      const key = fseName.toLowerCase();
+      if (!personMap[key]) {
+        personMap[key] = {
+          name: fseName,
+          userType: 'employee',
+          tlName: (a.tlName || '').trim(),
+          reportingManager: (a.tlName || '').trim(),
+        };
+      }
+    });
+
+    // Add/upgrade TLs — if already exists as FSE, upgrade to teamlead
+    accessList.forEach(a => {
+      const tlName = (a.tlName || '').trim();
+      if (!tlName) return;
+      const key = tlName.toLowerCase();
+      // TL who is also an FSE gets shown as teamlead
+      personMap[key] = {
+        name: personMap[key]?.name || tlName,
+        userType: 'teamlead',
+        tlName: tlName,
+        reportingManager: '',
+      };
+    });
+
+    const allPersons = Object.values(personMap);
+    const allNames   = allPersons.map(p => p.name);
+
+    // Step 2: Fetch attendance for those names — ONLY from TideBT logins
     const query = { source: { $in: ['tidebt-employee', 'tidebt-tl'] } };
     if (date) query.date = date;
     if (allNames.length > 0) {
@@ -27,26 +63,32 @@ router.get('/admin/all', async (req, res) => {
     const presentNames = new Set(attendanceRecords.map(r => (r.userName || '').trim().toLowerCase()));
 
     const absentRecords = [];
-    for (const name of allNames) {
-      if (!presentNames.has(name.toLowerCase())) {
-        // Check if they are FSE or TL
-        const isTL = tlNames.some(t => t.toLowerCase() === name.toLowerCase()) && !fseNames.some(f => f.toLowerCase() === name.toLowerCase());
-        const accessRecord = accessList.find(a =>
-          (a.fseName || '').trim().toLowerCase() === name.toLowerCase() ||
-          (a.tlName  || '').trim().toLowerCase() === name.toLowerCase()
-        );
+    for (const person of allPersons) {
+      if (!presentNames.has(person.name.toLowerCase())) {
         absentRecords.push({
-          userName: name,
-          userType: isTL ? 'teamlead' : 'employee',
-          status: 'absent',
-          date: date || new Date().toISOString().split('T')[0],
-          tlName: accessRecord?.tlName || '',
-          reportingManager: accessRecord?.tlName || '',
+          userName:         person.name,
+          userType:         person.userType,
+          status:           'absent',
+          date:             date || new Date().toISOString().split('T')[0],
+          tlName:           person.tlName,
+          reportingManager: person.reportingManager,
         });
       }
     }
 
-    const allRecords = [...attendanceRecords, ...absentRecords];
+    // Enrich attendance records with userType from personMap (in case it's missing)
+    const enriched = attendanceRecords.map(r => {
+      const key = (r.userName || '').trim().toLowerCase();
+      const person = personMap[key];
+      return {
+        ...r,
+        userType:         r.userType         || person?.userType         || 'employee',
+        tlName:           r.tlName           || person?.tlName           || '',
+        reportingManager: r.reportingManager || person?.reportingManager || '',
+      };
+    });
+
+    const allRecords = [...enriched, ...absentRecords];
 
     res.json({ success: true, attendance: allRecords, total: allRecords.length });
   } catch (err) {
@@ -62,9 +104,14 @@ router.get('/admin/summary', async (req, res) => {
     const { date } = req.query;
 
     const accessList = await db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray();
-    const fseNames = [...new Set(accessList.map(a => (a.fseName || '').trim()).filter(Boolean))];
-    const tlNames  = [...new Set(accessList.map(a => (a.tlName  || '').trim()).filter(Boolean))];
-    const allNames = [...new Set([...fseNames, ...tlNames])];
+    const fseNameSet = new Set(accessList.map(a => (a.fseName || '').trim()).filter(Boolean));
+    const tlNameSet  = new Set(accessList.map(a => (a.tlName  || '').trim()).filter(Boolean));
+
+    // Unique names — TL takes priority for deduplication
+    const allNamesSet = new Set();
+    fseNameSet.forEach(n => allNamesSet.add(n));
+    tlNameSet.forEach(n => allNamesSet.add(n));
+    const allNames = [...allNamesSet];
 
     const query = { source: { $in: ['tidebt-employee', 'tidebt-tl'] } };
     if (date) query.date = date;
