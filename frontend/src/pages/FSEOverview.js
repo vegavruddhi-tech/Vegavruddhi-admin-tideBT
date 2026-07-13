@@ -319,7 +319,6 @@ export default function FSEOverview() {
   const [allMerchantsData, setAllMerchantsData] = useState([]); // flat array of all merchants
 
   const loadAllFSEMerchants = useCallback(async () => {
-    if (allMerchantsData.length > 0) return; // already loaded
     setAllMerchantsLoading(true);
     try {
       const params = new URLSearchParams();
@@ -333,7 +332,7 @@ export default function FSEOverview() {
     } finally {
       setAllMerchantsLoading(false);
     }
-  }, [selectedMonth, selectedYear, allMerchantsData]);
+  }, [selectedMonth, selectedYear]);
 
   const handleExpandFSE = (fseName) => {
     if (expandedFSE === fseName) {
@@ -361,9 +360,9 @@ export default function FSEOverview() {
     else setExpandedFSE(null);
   }, [viewMode, fetchMerchantData]);
 
-  // Auto-load allMerchantsData when merchantData is available — so KPI cards show correct values immediately
+  // Auto-load allMerchantsData when merchantData is available
   useEffect(() => {
-    if (merchantData.length > 0 && allMerchantsData.length === 0 && !allMerchantsLoading) {
+    if (merchantData.length > 0 && !allMerchantsLoading) {
       loadAllFSEMerchants();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
