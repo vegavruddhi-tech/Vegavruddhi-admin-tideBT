@@ -124,7 +124,9 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
 
     return Object.values(tls).map(tl => {
       const fseList = Object.values(tl.fses).map(fse => {
-        const fseBT = fse.merchants.reduce((sum, m) => sum + (m.stage3 || 0) + (m.upiAmount || 0), 0);
+        const fseBT = fse.merchants.reduce((sum, m) => sum + (
+          kpiType === 'kpi-yesterday-bt' ? (m.yesterdaysStage3 || 0) : (m.stage3 || 0) + (m.upiAmount || 0)
+        ), 0);
         const fseRPActive = fse.merchants.filter(m => (m.rewardPassPro || '').toLowerCase() === 'active').length;
         const fseRPPending = fse.merchants.filter(m => (m.stage3 || 0) >= 10000 && (m.rewardPassPro || '').toLowerCase() !== 'active').length;
         const fsePassLive = fse.merchants.filter(m => (m.passLive || '').toLowerCase() === 'live').length;
@@ -380,7 +382,7 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
                                     <TableRow sx={{ bgcolor: '#f5faf7', '& th': { fontWeight: 700, fontSize: 10, color: 'text.secondary', textTransform: 'uppercase' } }}>
                                       <TableCell>Merchant Name</TableCell>
                                       <TableCell>Mobile Number</TableCell>
-                                      <TableCell align="right">BT Amount</TableCell>
+                                      <TableCell align="right">{kpiType === 'kpi-yesterday-bt' ? "Yesterday's BT" : 'BT Amount'}</TableCell>
                                       <TableCell>RP Status</TableCell>
                                       <TableCell>Pass Live</TableCell>
                                       <TableCell>Onboarding Status</TableCell>
@@ -392,7 +394,9 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
                                     {fse.merchants.map((m, i) => {
                                       const isRpActive = (m.rewardPassPro || '').toLowerCase() === 'active';
                                       const isPassLive = (m.passLive || '').toLowerCase() === 'live';
-                                      const combinedBt = (m.stage3 || 0) + (m.upiAmount || 0);
+                                      const combinedBt = kpiType === 'kpi-yesterday-bt'
+                                        ? (m.yesterdaysStage3 || 0)
+                                        : (m.stage3 || 0) + (m.upiAmount || 0);
                                       return (
                                         <TableRow key={i} hover sx={{ '&:hover': { bgcolor: '#f1fdf5' } }}>
                                           <TableCell sx={{ fontWeight: 700, color: '#333', fontSize: 12 }}>
@@ -402,10 +406,7 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
                                             {m.merchantNumber || '–'}
                                           </TableCell>
                                           <TableCell align="right" sx={{ fontWeight: 800, color: combinedBt > 0 ? '#e65100' : '#999', fontSize: 12 }}>
-                                            {kpiType === 'kpi-yesterday-bt'
-                                              ? ((m.yesterdaysStage3 || 0) > 0 ? `₹${(m.yesterdaysStage3).toLocaleString()}` : '–')
-                                              : (combinedBt > 0 ? `₹${combinedBt.toLocaleString()}` : '–')
-                                            }
+                                            {combinedBt > 0 ? `₹${combinedBt.toLocaleString()}` : '–'}
                                           </TableCell>
                                           <TableCell>
                                             {isRpActive ? (
