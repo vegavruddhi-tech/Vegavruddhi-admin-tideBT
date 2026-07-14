@@ -150,13 +150,24 @@ router.get('/admin/monthly', async (req, res) => {
     const y = parseInt(year  || new Date().getFullYear());
     const m = parseInt(month || (new Date().getMonth() + 1));
 
-    // Build all dates in this month — full month (don't cap at today)
-    const monthStart = new Date(y, m - 1, 1);
-    const monthEnd   = new Date(y, m, 0); // last day of month
+    // Build date range:
+    // - Current month → TODAY to month end inclusive (remaining days including today)
+    // - Past/future months → 1st to last day of month (full month)
+    const now        = new Date();
+    const todayIST   = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+    // Normalize to midnight to avoid time-of-day comparison issues
+    const todayMidnight = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
+    const monthEnd   = new Date(y, m, 0); // last day of month at midnight
+    const isCurrentMonth = y === todayIST.getFullYear() && m === (todayIST.getMonth() + 1);
+
+    // Start: today (midnight) for current month, 1st for past/future months
+    const startDay = isCurrentMonth
+      ? todayMidnight
+      : new Date(y, m - 1, 1);
 
     const allDates = [];
-    for (let d = new Date(monthStart); d <= monthEnd; d.setDate(d.getDate() + 1)) {
-      allDates.push(d.toISOString().split('T')[0]);
+    for (let d = new Date(startDay); d <= monthEnd; d.setDate(d.getDate() + 1)) {
+      allDates.push(new Date(d).toISOString().split('T')[0]);
     }
     const totalWorkingDays = allDates.length;
 
