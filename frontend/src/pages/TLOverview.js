@@ -627,7 +627,8 @@ function KpiDrillContent({ kpiDrillData, kpiDialog }) {
 
     return Object.values(tls).map(tl => {
       const fseList = Object.values(tl.fses).map(fse => {
-        const fseBT = fse.merchants.reduce((sum, m) => sum + (m.stage3 || 0), 0);
+        const getBT = (m) => kpiDialog === 'yesterday-bt' ? (m.yesterdaysStage3||0) : (m.stage3||0);
+        const fseBT = fse.merchants.reduce((sum, m) => sum + getBT(m), 0);
         const fseRPActive = fse.merchants.filter(m => (m.rewardPassPro || '').toLowerCase() === 'active').length;
         const fseRPPending = fse.merchants.filter(m => (m.stage3 || 0) >= 10000 && (m.rewardPassPro || '').toLowerCase() !== 'active').length;
 
@@ -642,7 +643,8 @@ function KpiDrillContent({ kpiDrillData, kpiDialog }) {
         };
       });
 
-      const tlBT = tl.merchants.reduce((sum, m) => sum + (m.stage3 || 0), 0);
+      const getBTtl = (m) => kpiDialog === 'yesterday-bt' ? (m.yesterdaysStage3||0) : (m.stage3||0);
+      const tlBT = tl.merchants.reduce((sum, m) => sum + getBTtl(m), 0);
       const tlRPActive = tl.merchants.filter(m => (m.rewardPassPro || '').toLowerCase() === 'active').length;
       const tlRPPending = tl.merchants.filter(m => (m.stage3 || 0) >= 10000 && (m.rewardPassPro || '').toLowerCase() !== 'active').length;
 
@@ -840,7 +842,7 @@ function KpiDrillContent({ kpiDrillData, kpiDialog }) {
                               </Box>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <Box sx={{ display: 'flex', gap: 0.5 }}>
-                                  <Chip label={`BT: ₹${fse.btAmount.toLocaleString()}`} size="small" sx={{ bgcolor: '#fff3e0', color: '#e65100', fontWeight: 700, fontSize: 9, height: 20 }} />
+                                  <Chip label={`${kpiDialog === 'yesterday-bt' ? "Yest BT" : "BT"}: ₹${fse.btAmount.toLocaleString()}`} size="small" sx={{ bgcolor: '#fff3e0', color: '#e65100', fontWeight: 700, fontSize: 9, height: 20 }} />
                                   <Chip label={`RP Act: ${fse.rpActiveCount}`} size="small" sx={{ bgcolor: '#ede9fe', color: '#7c3aed', fontWeight: 700, fontSize: 9, height: 20 }} />
                                   <Chip label={`RP Pend: ${fse.rpPendingCount}`} size="small" sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: 9, height: 20 }} />
                                 </Box>
@@ -856,7 +858,7 @@ function KpiDrillContent({ kpiDrillData, kpiDialog }) {
                                     <TableRow sx={{ bgcolor: '#f5faf7', '& th': { fontWeight: 700, fontSize: 10, color: 'text.secondary', textTransform: 'uppercase' } }}>
                                       <TableCell>Merchant Name</TableCell>
                                       <TableCell>Mobile Number</TableCell>
-                                      <TableCell align="right">BT Amount</TableCell>
+                                      <TableCell align="right">{kpiDialog === 'yesterday-bt' ? "Yesterday's BT" : 'BT Amount'}</TableCell>
                                       <TableCell>RP Status</TableCell>
                                       <TableCell>Pass Live</TableCell>
                                       <TableCell>Onboarding Status</TableCell>
@@ -876,8 +878,12 @@ function KpiDrillContent({ kpiDrillData, kpiDialog }) {
                                           <TableCell sx={{ fontFamily: 'monospace', fontSize: 11, color: '#555' }}>
                                             {m.merchantNumber || '–'}
                                           </TableCell>
-                                          <TableCell align="right" sx={{ fontWeight: 800, color: m.stage3 > 0 ? '#e65100' : '#999', fontSize: 12 }}>
-                                            {m.stage3 > 0 ? `₹${m.stage3.toLocaleString()}` : '–'}
+                                          <TableCell align="right" sx={{ fontWeight: 800, fontSize: 12,
+                                            color: (kpiDialog === 'yesterday-bt' ? (m.yesterdaysStage3||0) : (m.stage3||0)) > 0 ? '#e65100' : '#999' }}>
+                                            {(() => {
+                                              const val = kpiDialog === 'yesterday-bt' ? (m.yesterdaysStage3||0) : (m.stage3||0);
+                                              return val > 0 ? `₹${val.toLocaleString()}` : '–';
+                                            })()}
                                           </TableCell>
                                           <TableCell>
                                             {isRpActive ? (
@@ -1005,9 +1011,10 @@ export default function TLOverview() {
   useEffect(() => {
     if (!kpiDialog || allMerchantsData.length === 0) return;
     let drill = [];
-    if (kpiDialog === 'bt-done')    drill = allMerchantsData.filter(m => (m.stage3||0)>0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
-    if (kpiDialog === 'rp-active')  drill = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
-    if (kpiDialog === 'rp-pending') drill = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+    if (kpiDialog === 'bt-done')      drill = allMerchantsData.filter(m => (m.stage3||0)>0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+    if (kpiDialog === 'yesterday-bt') drill = allMerchantsData.filter(m => (m.yesterdaysStage3||0)>0).sort((a,b)=>(b.yesterdaysStage3||0)-(a.yesterdaysStage3||0));
+    if (kpiDialog === 'rp-active')    drill = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
+    if (kpiDialog === 'rp-pending')   drill = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').sort((a,b)=>(b.stage3||0)-(a.stage3||0));
     setKpiDrillData(drill);
   }, [allMerchantsData, kpiDialog]);
 
@@ -1084,9 +1091,10 @@ export default function TLOverview() {
             {kpis.map(kpi => (
               <Card key={kpi.key} onClick={() => {
                 let drill = [];
-                if (kpi.key === 'bt-done')    drill = allMerchantsData.filter(m => (m.stage3||0)>0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
-                if (kpi.key === 'rp-active')  drill = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
-                if (kpi.key === 'rp-pending') drill = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+                if (kpi.key === 'bt-done')      drill = allMerchantsData.filter(m => (m.stage3||0)>0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+                if (kpi.key === 'yesterday-bt') drill = allMerchantsData.filter(m => (m.yesterdaysStage3||0)>0).sort((a,b)=>(b.yesterdaysStage3||0)-(a.yesterdaysStage3||0));
+                if (kpi.key === 'rp-active')    drill = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
+                if (kpi.key === 'rp-pending')   drill = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').sort((a,b)=>(b.stage3||0)-(a.stage3||0));
                 setKpiDrillData(drill);
                 setKpiDialog(kpi.key);
                 // If data not loaded yet, trigger load

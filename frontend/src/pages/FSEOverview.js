@@ -422,11 +422,11 @@ export default function FSEOverview() {
   const kpiDrillMerchants = useMemo(() => {
     if (!kpiDialog || allMerchantsData.length === 0) return [];
     switch (kpiDialog) {
-      case 'bt-done':    return allMerchantsData.filter(m => (m.stage3||0) > 0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
-      case 'rp-active':  return allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
-      case 'bt-pending': return allMerchantsData.filter(m => (m.stage3||0)===0);
-      // RP Pending = BT ≥ ₹10,000 AND RP not active
-      case 'rp-pending': return allMerchantsData
+      case 'bt-done':      return allMerchantsData.filter(m => (m.stage3||0) > 0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+      case 'yesterday-bt': return allMerchantsData.filter(m => (m.yesterdaysStage3||0) > 0).sort((a,b)=>(b.yesterdaysStage3||0)-(a.yesterdaysStage3||0));
+      case 'rp-active':    return allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
+      case 'bt-pending':   return allMerchantsData.filter(m => (m.stage3||0)===0);
+      case 'rp-pending':   return allMerchantsData
         .filter(m => (m.stage3||0) >= 10000 && (m.rewardPassPro||'').toLowerCase()!=='active')
         .sort((a,b) => (b.stage3||0)-(a.stage3||0));
       default: return [];
@@ -889,7 +889,7 @@ export default function FSEOverview() {
                     <TableCell>Merchant</TableCell>
                     <TableCell>Mobile</TableCell>
                     <TableCell>Status</TableCell>
-                    <TableCell align="right">BT Amount</TableCell>
+                    <TableCell align="right">{kpiDialog === 'yesterday-bt' ? "Yesterday's BT" : 'BT Amount'}</TableCell>
                     <TableCell>RP</TableCell>
                     <TableCell>Pass Live</TableCell>
                     {kpiDialog === 'rp-pending' && <TableCell align="right">Pending Days</TableCell>}
@@ -917,9 +917,14 @@ export default function FSEOverview() {
                           }} />
                       </TableCell>
                       <TableCell align="right">
-                        <Typography variant="body2" fontWeight={700} color={m.stage3 > 0 ? '#e65100' : '#999'}>
-                          {m.stage3 > 0 ? `₹${m.stage3.toLocaleString()}` : '–'}
-                        </Typography>
+                        {(() => {
+                          const val = kpiDialog === 'yesterday-bt' ? (m.yesterdaysStage3||0) : (m.stage3||0);
+                          return (
+                            <Typography variant="body2" fontWeight={700} color={val > 0 ? '#e65100' : '#999'}>
+                              {val > 0 ? `₹${val.toLocaleString()}` : '–'}
+                            </Typography>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         {(m.rewardPassPro||'').toLowerCase()==='active'
