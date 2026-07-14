@@ -13,7 +13,7 @@ async function run() {
   const mongoUri        = process.env.MONGODB_URI || process.env.MONGO_URI;
   const sheetId         = process.env.GOOGLE_SHEET_ID; // 1XD1x9VeyGbGnCKw2w8pAlsf6zoxs59OSKxpRDcgmZ6U
   const tabName         = 'BT TL CONNECT JULY';
-  const mongoCollection = 'bt_tl_connect july'; // matches renamed collection in MongoDB
+  const mongoCollection = 'BT_TL_CONNECT JULY'; // canonical uppercase+space format — picked first by collection picker
 
   if (!sheetId) { console.error('GOOGLE_SHEET_ID not set in .env'); process.exit(1); }
 
