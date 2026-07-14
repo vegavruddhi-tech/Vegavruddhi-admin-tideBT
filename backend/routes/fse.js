@@ -261,12 +261,14 @@ router.get('/merchants/all-details', async (req, res) => {
           };
         }
         const m = merchantMap[num];
-        m.stage3    = parseNum(r.stage3 || r.Stage_3 || r['Stage-3']);
-        m.stage3Gap = parseNum(r.stage3Gap || r['Stage-3_GAP']);
-        m.passLive  = getStr(r, ['passLive','pass_live','Pass_Live']);
+        // ACCUMULATE stage3 across duplicate rows (same merchant may appear multiple times)
+        // This handles 471 duplicate numbers in the sheet without losing BT data
+        m.stage3    += parseNum(r.stage3 || r.Stage_3 || r['Stage-3']);
+        m.stage3Gap  = parseNum(r.stage3Gap || r['Stage-3_GAP']); // take latest
+        m.passLive   = getStr(r, ['passLive','pass_live','Pass_Live']);
         m.rewardPassPro = getStr(r, ['rewardPassPro','reward_pass_pro','priorityPassPro']);
-        m.upiTxnCount = parseNum(r.upiTxnCount || r.upi_txn_count || r.Upi_Txn_Count);
-        m.upiAmount   = parseNum(r.withdrawAmount || r.UPI_Amount || r.upiAmount);
+        m.upiTxnCount += parseNum(r.upiTxnCount || r.upi_txn_count || r.Upi_Txn_Count);
+        m.upiAmount   += parseNum(r.withdrawAmount || r.UPI_Amount || r.upiAmount);
         const isLive = m.passLive.toLowerCase()==='live';
         const isActive = m.rewardPassPro.toLowerCase()==='active';
         m.btVerified = isLive || isActive || m.stage3 > 0;
