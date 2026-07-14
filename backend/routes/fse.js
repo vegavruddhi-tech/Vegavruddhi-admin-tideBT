@@ -239,13 +239,28 @@ router.get('/merchants/all-details', async (req, res) => {
     if (btCollectionName) {
       const parseNum = v => { const n = parseFloat(String(v||'0').replace(/,/g,'')); return isNaN(n)?0:n; };
       const getStr = (r, keys) => { for (const k of keys) { if (r[k]!==undefined&&r[k]!==null) return String(r[k]).trim(); } return '–'; };
+      // Fetch ALL docs from BT collection — not restricted to bt_master numbers
+      // This ensures merchants in the sheet but missing from bt_master are still counted
       const btDocs = await db.collection(btCollectionName).find(
-        { merchantNumber: { $in: merchantNums } },
-        { projection: { merchantNumber: 1, stage3: 1, stage3Gap: 1, passLive: 1, pass_live: 1, Pass_Live: 1, rewardPassPro: 1, reward_pass_pro: 1, priorityPassPro: 1, upiTxnCount: 1, upi_txn_count: 1, Upi_Txn_Count: 1, withdrawAmount: 1, UPI_Amount: 1, upiAmount: 1, _id: 0 } }
+        {},
+        { projection: { merchantNumber: 1, stage3: 1, stage3Gap: 1, passLive: 1, pass_live: 1, Pass_Live: 1, rewardPassPro: 1, reward_pass_pro: 1, priorityPassPro: 1, upiTxnCount: 1, upi_txn_count: 1, Upi_Txn_Count: 1, withdrawAmount: 1, UPI_Amount: 1, upiAmount: 1, lead: 1, Lead: 1, teamLeadName: 1, _id: 0 } }
       ).toArray();
       btDocs.forEach(r => {
-        const m = merchantMap[(r.merchantNumber||'').trim()];
-        if (!m) return;
+        const num = (r.merchantNumber || '').trim();
+        if (!num) return;
+        // Add to merchantMap if not already there (merchant in sheet but not in bt_master)
+        if (!merchantMap[num]) {
+          merchantMap[num] = {
+            merchantNumber: num, merchantName: '–',
+            fseName: (r.lead || r.Lead || '').trim(),
+            tl: (r.teamLeadName || '').trim(),
+            tlName: (r.teamLeadName || '').trim() || '–',
+            onboardingStatus: 'Pending', lastActivity: null,
+            stage3: 0, stage3Gap: 0, passLive: '–', rewardPassPro: '–',
+            upiTxnCount: 0, btVerified: false, merchantCategory: '–'
+          };
+        }
+        const m = merchantMap[num];
         m.stage3    = parseNum(r.stage3 || r.Stage_3 || r['Stage-3']);
         m.stage3Gap = parseNum(r.stage3Gap || r['Stage-3_GAP']);
         m.passLive  = getStr(r, ['passLive','pass_live','Pass_Live']);
