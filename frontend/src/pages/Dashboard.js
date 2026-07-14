@@ -26,6 +26,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import HourglassEmptyIcon from '@mui/icons-material/HourglassEmpty';
 import HourglassTopIcon from '@mui/icons-material/HourglassTop';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
@@ -354,6 +355,7 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <Box sx={{ display: 'flex', gap: 0.5 }}>
                                   {kpiType === 'kpi-bt-completed' && <Chip label={`BT: ₹${fse.btAmount.toLocaleString()}`} size="small" sx={{ bgcolor: '#fff3e0', color: '#e65100', fontWeight: 700, fontSize: 9, height: 20 }} />}
+                                  {kpiType === 'kpi-yesterday-bt' && <Chip label={`Yest BT: ₹${fse.merchants.reduce((s,m)=>s+(m.yesterdaysStage3||0),0).toLocaleString()}`} size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700, fontSize: 9, height: 20 }} />}
                                   {kpiType === 'kpi-rp-purchased' && <Chip label={`RP Purchased: ${fse.rpPurchasedCount}`} size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700, fontSize: 9, height: 20 }} />}
                                   {kpiType === 'kpi-rp-active' && <Chip label={`RP Act: ${fse.rpActiveCount}`} size="small" sx={{ bgcolor: '#ede9fe', color: '#7c3aed', fontWeight: 700, fontSize: 9, height: 20 }} />}
                                   {kpiType === 'kpi-rp-pending' && <Chip label={`RP Pend: ${fse.rpPendingCount}`} size="small" sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: 9, height: 20 }} />}
@@ -400,7 +402,10 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
                                             {m.merchantNumber || '–'}
                                           </TableCell>
                                           <TableCell align="right" sx={{ fontWeight: 800, color: combinedBt > 0 ? '#e65100' : '#999', fontSize: 12 }}>
-                                            {combinedBt > 0 ? `₹${combinedBt.toLocaleString()}` : '–'}
+                                            {kpiType === 'kpi-yesterday-bt'
+                                              ? ((m.yesterdaysStage3 || 0) > 0 ? `₹${(m.yesterdaysStage3).toLocaleString()}` : '–')
+                                              : (combinedBt > 0 ? `₹${combinedBt.toLocaleString()}` : '–')
+                                            }
                                           </TableCell>
                                           <TableCell>
                                             {isRpActive ? (
@@ -607,6 +612,9 @@ export default function Dashboard() {
     // but only 58 FSEs are currently active in TideBT_Access
     const totalActiveFses = fses.length;
 
+    // 9. Yesterday's BT — sum of yesterdaysStage3 field from BT collection
+    const yesterdaysBtCompleted = merchantsData.reduce((sum, m) => sum + (m.yesterdaysStage3 || 0), 0);
+
     return {
       totalBtCompleted,
       totalRpPurchased,
@@ -615,7 +623,8 @@ export default function Dashboard() {
       passLiveCount,
       pendingBtCount,
       totalMerchants,
-      totalActiveFses
+      totalActiveFses,
+      yesterdaysBtCompleted
     };
   }, [merchantsData, rewardPassData, selectedMonth, selectedYear, fses]);
 
@@ -866,6 +875,13 @@ export default function Dashboard() {
     if (type === 'kpi-bt-completed') {
       setDialogTitle('Total BT Completed (Stage 3)');
       setDialogData(merchantsData.filter(m => (m.stage3 || 0) > 0));
+    } else if (type === 'kpi-yesterday-bt') {
+      setDialogTitle("Yesterday's BT — All Merchants");
+      setDialogData(
+        merchantsData
+          .filter(m => (m.yesterdaysStage3 || 0) > 0)
+          .sort((a, b) => (b.yesterdaysStage3 || 0) - (a.yesterdaysStage3 || 0))
+      );
     } else if (type === 'kpi-rp-purchased') {
       setDialogTitle('Total RP Purchased');
       // Build FSE claims map
@@ -932,7 +948,7 @@ export default function Dashboard() {
     const displayData = dialogData.length > MAX_DIALOG_ROWS ? dialogData.slice(0, MAX_DIALOG_ROWS) : dialogData;
     const isTruncated = dialogData.length > MAX_DIALOG_ROWS;
 
-    if (['kpi-bt-completed', 'kpi-rp-purchased', 'kpi-rp-active', 'kpi-rp-pending', 'kpi-pass-live', 'kpi-pending-bt', 'kpi-total-merchants', 'kpi-active-fse'].includes(dialogType)) {
+    if (['kpi-bt-completed', 'kpi-yesterday-bt', 'kpi-rp-purchased', 'kpi-rp-active', 'kpi-rp-pending', 'kpi-pass-live', 'kpi-pending-bt', 'kpi-total-merchants', 'kpi-active-fse'].includes(dialogType)) {
       return (
         <>
           {isTruncated && (
@@ -1111,6 +1127,7 @@ export default function Dashboard() {
 
   const statCards = [
     { title: 'Total BT Completed', value: `₹${performanceKpis.totalBtCompleted.toLocaleString()}`, icon: <AccountBalanceIcon />, color: 'linear-gradient(135deg, #e65100, #ff9800)', type: 'kpi-bt-completed' },
+    { title: "Yesterday's BT", value: `₹${performanceKpis.yesterdaysBtCompleted.toLocaleString()}`, icon: <TrendingUpIcon />, color: 'linear-gradient(135deg, #0369a1, #38bdf8)', type: 'kpi-yesterday-bt' },
     { title: 'Total RP Active', value: performanceKpis.totalRpActive, icon: <VerifiedIcon />, color: 'linear-gradient(135deg, #7c3aed, #a78bfa)', type: 'kpi-rp-active' },
     { title: 'RP Pending (BT ≥ ₹10k)', value: performanceKpis.rpPending, icon: <HourglassEmptyIcon />, color: 'linear-gradient(135deg, #b45309, #f59e0b)', type: 'kpi-rp-pending' },
     { title: 'Pass Live Count', value: performanceKpis.passLiveCount, icon: <CheckCircleIcon />, color: 'linear-gradient(135deg, #15803d, #22c55e)', type: 'kpi-pass-live' },
@@ -1314,7 +1331,7 @@ export default function Dashboard() {
       {/* Detail Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6" fontWeight={700}>{dialogTitle}</Typography>
+          <span style={{ fontWeight: 700, fontSize: '1.1rem' }}>{dialogTitle}</span>
           <IconButton onClick={() => setDialogOpen(false)} size="small"><CloseIcon /></IconButton>
         </DialogTitle>
         <DialogContent dividers>{renderDialogContent()}</DialogContent>

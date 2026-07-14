@@ -214,7 +214,8 @@ router.get('/merchants/all-details', async (req, res) => {
         tlName: (m.tl||'').trim() || '–',  // explicit tlName field for TL Overview
         onboardingStatus: 'Pending', lastActivity: null,
         stage3: 0, stage3Gap: 0, passLive: '–', rewardPassPro: '–',
-        upiTxnCount: 0, btVerified: false, merchantCategory: '–'
+        upiTxnCount: 0, btVerified: false, merchantCategory: '–',
+        yesterdaysStage3: 0
       };
     });
 
@@ -243,7 +244,7 @@ router.get('/merchants/all-details', async (req, res) => {
       // This ensures merchants in the sheet but missing from bt_master are still counted
       const btDocs = await db.collection(btCollectionName).find(
         {},
-        { projection: { merchantNumber: 1, stage3: 1, stage3Gap: 1, passLive: 1, pass_live: 1, Pass_Live: 1, rewardPassPro: 1, reward_pass_pro: 1, priorityPassPro: 1, upiTxnCount: 1, upi_txn_count: 1, Upi_Txn_Count: 1, withdrawAmount: 1, UPI_Amount: 1, upiAmount: 1, lead: 1, Lead: 1, teamLeadName: 1, _id: 0 } }
+        { projection: { merchantNumber: 1, stage3: 1, stage3Gap: 1, passLive: 1, pass_live: 1, Pass_Live: 1, rewardPassPro: 1, reward_pass_pro: 1, priorityPassPro: 1, upiTxnCount: 1, upi_txn_count: 1, Upi_Txn_Count: 1, withdrawAmount: 1, UPI_Amount: 1, upiAmount: 1, lead: 1, Lead: 1, teamLeadName: 1, yesterdaysStage3: 1, yesterday_s_stage_3: 1, _id: 0 } }
       ).toArray();
       btDocs.forEach(r => {
         const num = (r.merchantNumber || '').trim();
@@ -257,13 +258,15 @@ router.get('/merchants/all-details', async (req, res) => {
             tlName: (r.teamLeadName || '').trim() || '–',
             onboardingStatus: 'Pending', lastActivity: null,
             stage3: 0, stage3Gap: 0, passLive: '–', rewardPassPro: '–',
-            upiTxnCount: 0, btVerified: false, merchantCategory: '–'
+            upiTxnCount: 0, btVerified: false, merchantCategory: '–',
+            yesterdaysStage3: 0
           };
         }
         const m = merchantMap[num];
         // Take the latest value (overwrite) — duplicate rows have same BT amount, not split
         m.stage3    = parseNum(r.stage3 || r.Stage_3 || r['Stage-3']);
         m.stage3Gap = parseNum(r.stage3Gap || r['Stage-3_GAP']);
+        m.yesterdaysStage3 = parseNum(r.yesterdaysStage3 || r.yesterday_s_stage_3 || r["Yesterday's_Stage-3"] || r["Yesterday's_Stage_3"] || 0);
         m.passLive  = getStr(r, ['passLive','pass_live','Pass_Live']);
         m.rewardPassPro = getStr(r, ['rewardPassPro','reward_pass_pro','priorityPassPro']);
         m.upiTxnCount = parseNum(r.upiTxnCount || r.upi_txn_count || r.Upi_Txn_Count);
@@ -286,6 +289,7 @@ router.get('/merchants/all-details', async (req, res) => {
       lastActivity:   m.lastActivity,
       stage3:         m.stage3,
       stage3Gap:      m.stage3Gap,
+      yesterdaysStage3: m.yesterdaysStage3 || 0,
       passLive:       m.passLive,
       rewardPassPro:  m.rewardPassPro,
       upiTxnCount:    m.upiTxnCount,

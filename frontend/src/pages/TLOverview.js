@@ -272,11 +272,12 @@ function TLCard({ tl, onViewForm, dateFilter, fromDate, toDate, selectedYear, se
           {/* Tab buttons */}
           <Box sx={{ display: 'flex', gap: 1, mb: 2, borderBottom: '2px solid #e8f3ed', pt: 1 }}>
             {[
-              { key: 'forms',     label: `📋 Forms (${filteredForms.length})` },
-              { key: 'merchants', label: `🏪 Merchants` },
+              { key: 'forms',       label: `📋 Forms (${filteredForms.length})` },
+              { key: 'merchants',   label: `🏪 Merchants` },
+              { key: 'performance', label: `📊 Team Performance` },
             ].map(tab => (
               <button key={tab.key}
-                onClick={() => { setTlTab(tab.key); if (tab.key === 'merchants') loadMerchants(); }}
+                onClick={() => { setTlTab(tab.key); if (tab.key === 'merchants' || tab.key === 'performance') loadMerchants(); }}
                 style={{ padding: '6px 14px', border: 'none', background: tlTab === tab.key ? '#1a4731' : 'transparent',
                   color: tlTab === tab.key ? '#fff' : '#1a4731', fontWeight: 700, fontSize: 11,
                   cursor: 'pointer', borderRadius: '8px 8px 0 0' }}>
@@ -436,6 +437,109 @@ function TLCard({ tl, onViewForm, dateFilter, fromDate, toDate, selectedYear, se
                   );
                 })()
               )}
+            </Box>
+          )}
+
+          {/* Team Performance Tab */}
+          {tlTab === 'performance' && (
+            <Box>
+              {merchantsLoading ? (
+                <Box display="flex" justifyContent="center" py={4}><CircularProgress size={24} sx={{ color: '#1a5c38' }} /></Box>
+              ) : !teamMerchants || teamMerchants.length === 0 ? (
+                <Typography color="text.secondary" variant="body2" sx={{ py: 2, textAlign: 'center' }}>No data. Click Merchants tab first to load.</Typography>
+              ) : (() => {
+                // Aggregate per FSE from teamMerchants
+                const fseMap = {};
+                (teamMerchants || []).forEach(m => {
+                  const fse = m.fseName || '–';
+                  if (!fseMap[fse]) fseMap[fse] = { name: fse, total: 0, btDone: 0, btAmt: 0, rpActive: 0, passLive: 0, pending: 0 };
+                  fseMap[fse].total++;
+                  if ((m.stage3 || 0) > 0) { fseMap[fse].btDone++; fseMap[fse].btAmt += (m.stage3 || 0); }
+                  if ((m.rewardPassPro || '').toLowerCase() === 'active') fseMap[fse].rpActive++;
+                  if ((m.passLive || '').toLowerCase() === 'live') fseMap[fse].passLive++;
+                  if ((m.stage3 || 0) === 0) fseMap[fse].pending++;
+                });
+                const fseRows = Object.values(fseMap).sort((a, b) => b.btAmt - a.btAmt);
+                // Team totals
+                const teamTotal   = fseRows.reduce((s, f) => s + f.total, 0);
+                const teamBTAmt   = fseRows.reduce((s, f) => s + f.btAmt, 0);
+                const teamBTDone  = fseRows.reduce((s, f) => s + f.btDone, 0);
+                const teamRP      = fseRows.reduce((s, f) => s + f.rpActive, 0);
+                const teamLive    = fseRows.reduce((s, f) => s + f.passLive, 0);
+                const teamPending = fseRows.reduce((s, f) => s + f.pending, 0);
+                return (
+                  <Box>
+                    {/* Summary bar */}
+                    <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
+                      {[
+                        { label: 'Total BT', value: `₹${teamBTAmt.toLocaleString()}`, color: '#e65100', bg: '#fff3e0' },
+                        { label: 'BT Done', value: teamBTDone, color: '#0369a1', bg: '#e0f2fe' },
+                        { label: 'RP Active', value: teamRP, color: '#7c3aed', bg: '#ede9fe' },
+                        { label: 'Pass Live', value: teamLive, color: '#15803d', bg: '#d8f3dc' },
+                        { label: 'Pending', value: teamPending, color: '#be123c', bg: '#ffe4e6' },
+                      ].map(s => (
+                        <Box key={s.label} sx={{ bgcolor: s.bg, px: 1.5, py: 0.75, borderRadius: 2, textAlign: 'center', minWidth: 80 }}>
+                          <Typography sx={{ fontSize: 9, fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 }}>{s.label}</Typography>
+                          <Typography sx={{ fontSize: 13, fontWeight: 800, color: s.color }}>{s.value}</Typography>
+                        </Box>
+                      ))}
+                    </Box>
+
+                    {/* Per-FSE table */}
+                    <Box sx={{ overflowX: 'auto' }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 10, textTransform: 'uppercase', color: 'text.secondary', bgcolor: '#f5faf7' } }}>
+                            <TableCell>FSE Name</TableCell>
+                            <TableCell align="center">Total</TableCell>
+                            <TableCell align="center">BT Done</TableCell>
+                            <TableCell align="right">BT Amount</TableCell>
+                            <TableCell align="center">RP Active</TableCell>
+                            <TableCell align="center">Pass Live</TableCell>
+                            <TableCell align="center">Pending</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {fseRows.map((f, i) => (
+                            <TableRow key={i} hover sx={{ '&:hover': { bgcolor: '#f1fdf5' } }}>
+                              <TableCell sx={{ fontWeight: 700, color: '#1a5c38', fontSize: 12 }}>{f.name}</TableCell>
+                              <TableCell align="center" sx={{ fontSize: 12 }}>{f.total}</TableCell>
+                              <TableCell align="center">
+                                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}>
+                                  <Typography sx={{ fontSize: 12, fontWeight: 700, color: f.btDone > 0 ? '#0369a1' : '#999' }}>{f.btDone}</Typography>
+                                  {f.total > 0 && <Typography sx={{ fontSize: 9, color: 'text.secondary' }}>({Math.round(f.btDone/f.total*100)}%)</Typography>}
+                                </Box>
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: 800, color: f.btAmt > 0 ? '#e65100' : '#999', fontSize: 12 }}>
+                                {f.btAmt > 0 ? `₹${f.btAmt.toLocaleString()}` : '–'}
+                              </TableCell>
+                              <TableCell align="center">
+                                <Typography sx={{ fontSize: 12, fontWeight: 700, color: f.rpActive > 0 ? '#7c3aed' : '#999' }}>{f.rpActive || '–'}</Typography>
+                              </TableCell>
+                              <TableCell align="center">
+                                <Typography sx={{ fontSize: 12, fontWeight: 700, color: f.passLive > 0 ? '#15803d' : '#999' }}>{f.passLive || '–'}</Typography>
+                              </TableCell>
+                              <TableCell align="center">
+                                <Typography sx={{ fontSize: 12, fontWeight: 700, color: f.pending > 0 ? '#be123c' : '#999' }}>{f.pending || '–'}</Typography>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          {/* Totals row */}
+                          <TableRow sx={{ bgcolor: '#f0fdf4', '& td': { fontWeight: 800, fontSize: 12, borderTop: '2px solid #c8e6c9' } }}>
+                            <TableCell sx={{ color: '#1a5c38' }}>TOTAL ({fseRows.length} FSEs)</TableCell>
+                            <TableCell align="center">{teamTotal}</TableCell>
+                            <TableCell align="center" sx={{ color: '#0369a1' }}>{teamBTDone}</TableCell>
+                            <TableCell align="right" sx={{ color: '#e65100' }}>₹{teamBTAmt.toLocaleString()}</TableCell>
+                            <TableCell align="center" sx={{ color: '#7c3aed' }}>{teamRP}</TableCell>
+                            <TableCell align="center" sx={{ color: '#15803d' }}>{teamLive}</TableCell>
+                            <TableCell align="center" sx={{ color: '#be123c' }}>{teamPending}</TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </Box>
+                  </Box>
+                );
+              })()}
             </Box>
           )}
         </Box>

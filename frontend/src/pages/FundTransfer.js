@@ -504,14 +504,16 @@ export default function FundTransfer() {
                     sx={{ bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 700, fontSize: 11, height: 22 }}
                   />
                   <Tooltip title="Refresh carry-forward data (after syncing opening balances)">
-                    <IconButton
-                      size="small"
-                      onClick={handleBustCache}
-                      disabled={bustingCache || summaryLoading}
-                      sx={{ color: '#1a5c38', border: '1px solid #c8e6c9', borderRadius: 1.5, p: 0.5 }}
-                    >
-                      <RefreshIcon fontSize="small" sx={{ animation: bustingCache ? 'spin 1s linear infinite' : 'none', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} />
-                    </IconButton>
+                    <span>
+                      <IconButton
+                        size="small"
+                        onClick={handleBustCache}
+                        disabled={bustingCache || summaryLoading}
+                        sx={{ color: '#1a5c38', border: '1px solid #c8e6c9', borderRadius: 1.5, p: 0.5 }}
+                      >
+                        <RefreshIcon fontSize="small" sx={{ animation: bustingCache ? 'spin 1s linear infinite' : 'none', '@keyframes spin': { '0%': { transform: 'rotate(0deg)' }, '100%': { transform: 'rotate(360deg)' } } }} />
+                      </IconButton>
+                    </span>
                   </Tooltip>
                 </Box>
                 <Tabs
