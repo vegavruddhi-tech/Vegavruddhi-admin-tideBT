@@ -1193,9 +1193,9 @@ export default function Dashboard() {
               <Typography color="text.secondary" textAlign="center" py={4}>No RP Active data for selected period</Typography>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={rpPerFSE} margin={{ top: 20, right: 20, bottom: 5, left: 0 }}>
+                <BarChart data={rpPerFSE} margin={{ top: 20, right: 20, bottom: 60, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" fontSize={11} />
+                  <XAxis dataKey="name" fontSize={10} angle={-35} textAnchor="end" interval={0} tick={{ dy: 5 }} />
                   <YAxis allowDecimals={false} />
                   <RechartsTooltip formatter={(value, name, props) => [value + ' RP Active', props.payload.fullName]} />
                   <Bar dataKey="count" fill="#7c3aed" radius={[4, 4, 0, 0]} cursor="pointer"
@@ -1217,13 +1217,22 @@ export default function Dashboard() {
             ) : (
               <ResponsiveContainer width="100%" height={300}>
                 <PieChart>
-                  <Pie data={onboardingPie} cx="50%" cy="50%" outerRadius={100} dataKey="value" 
-                    label={({ name, value }) => `${name}: ${value}`} labelLine={false}
+                  <Pie data={onboardingPie} cx="50%" cy="50%" outerRadius={110} dataKey="value"
                     cursor="pointer" onClick={(_, index) => handleChartClick('onboardingPie', onboardingPie[index])}>
-                    {onboardingPie.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    {onboardingPie.map((entry, i) => (
+                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                    ))}
+                    <LabelList
+                      dataKey="value"
+                      position="inside"
+                      fontSize={13}
+                      fontWeight={700}
+                      fill="#fff"
+                      formatter={(value) => value > 0 ? value : ''}
+                    />
                   </Pie>
-                  <Legend />
-                  <RechartsTooltip />
+                  <Legend formatter={(value, entry) => `${value}: ${entry.payload.value}`} />
+                  <RechartsTooltip formatter={(value, name) => [value, name]} />
                 </PieChart>
               </ResponsiveContainer>
             )}
@@ -1312,10 +1321,10 @@ export default function Dashboard() {
             {tlFundChart.length === 0 ? (
               <Typography color="text.secondary" textAlign="center" py={4}>No fund transfer data</Typography>
             ) : (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={tlFundChart} margin={{ top: 10, right: 30, bottom: 5, left: 20 }}>
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={tlFundChart} margin={{ top: 10, right: 30, bottom: 70, left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" fontSize={11} />
+                  <XAxis dataKey="name" fontSize={10} angle={-35} textAnchor="end" interval={0} tick={{ dy: 5 }} />
                   <YAxis allowDecimals={false} tickFormatter={(v) => `₹${(v/1000).toFixed(0)}k`} />
                   <RechartsTooltip formatter={(value) => [`₹${value.toLocaleString()}`, '']} />
                   <Legend />
