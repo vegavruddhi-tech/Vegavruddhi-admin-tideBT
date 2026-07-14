@@ -400,21 +400,20 @@ export default function FSEOverview() {
   const merchantKPIs = useMemo(() => {
     if (allMerchantsData.length > 0) {
       return {
-        totalBT:   allMerchantsData.reduce((s,m) => s+(m.stage3||0), 0),
-        rpActive:  allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active').length,
-        btPending: allMerchantsData.filter(m => (m.stage3||0)===0).length,
-        // RP Pending = BT ≥ ₹10,000 AND RP not active
-        rpPending: allMerchantsData.filter(m => (m.stage3||0) >= 10000 && (m.rewardPassPro||'').toLowerCase()!=='active').length,
+        totalBT:      allMerchantsData.reduce((s,m) => s+(m.stage3||0), 0),
+        yesterdaysBT: allMerchantsData.reduce((s,m) => s+(m.yesterdaysStage3||0), 0),
+        rpActive:     allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active').length,
+        btPending:    allMerchantsData.filter(m => (m.stage3||0)===0).length,
+        rpPending:    allMerchantsData.filter(m => (m.stage3||0) >= 10000 && (m.rewardPassPro||'').toLowerCase()!=='active').length,
         all: allMerchantsData
       };
     }
-    // Fallback summary — note rpPending from summary doesn't have BT ≥ 10k filter
-    // Show loading state (0) until allMerchantsData loads
     return {
-      totalBT:   merchantData.reduce((s,f) => s+(f.metrics.totalBT||0), 0),
-      rpActive:  merchantData.reduce((s,f) => s+(f.metrics.rpDone||0), 0),
-      btPending: merchantData.reduce((s,f) => s+(f.metrics.total-(f.metrics.btDone||0)), 0),
-      rpPending: null, // null = loading, will be correct once allMerchantsData loads
+      totalBT:      merchantData.reduce((s,f) => s+(f.metrics.totalBT||0), 0),
+      yesterdaysBT: 0,
+      rpActive:     merchantData.reduce((s,f) => s+(f.metrics.rpDone||0), 0),
+      btPending:    merchantData.reduce((s,f) => s+(f.metrics.total-(f.metrics.btDone||0)), 0),
+      rpPending: null,
       all: []
     };
   }, [merchantData, allMerchantsData]);
@@ -689,9 +688,10 @@ export default function FSEOverview() {
           {merchantData.length > 0 && (
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 2, mb: 3 }}>
               {[
-                { key: 'bt-done',    label: 'Total BT Completed', value: `₹${(merchantKPIs.totalBT||0).toLocaleString()}`, color: '#e65100', bg: '#fff3e0', border: '#e6510030', icon: '💰', sub: `${merchantData.reduce((s,f)=>s+(f.metrics.btDone||0),0)} merchants` },
-                { key: 'rp-active',  label: 'Total RP Active',    value: merchantKPIs.rpActive,  color: '#7c3aed', bg: '#ede9fe', border: '#7c3aed30', icon: '🏅', sub: 'Reward Pass activated' },
-                { key: 'rp-pending', label: 'RP Pending',
+                { key: 'bt-done',      label: 'Total BT Completed', value: `₹${(merchantKPIs.totalBT||0).toLocaleString()}`, color: '#e65100', bg: '#fff3e0', border: '#e6510030', icon: '💰', sub: `${merchantData.reduce((s,f)=>s+(f.metrics.btDone||0),0)} merchants` },
+                { key: 'yesterday-bt', label: "Yesterday's BT",      value: `₹${(merchantKPIs.yesterdaysBT||0).toLocaleString()}`, color: '#0369a1', bg: '#e0f2fe', border: '#0369a130', icon: '📈', sub: 'BT done yesterday' },
+                { key: 'rp-active',    label: 'Total RP Active',    value: merchantKPIs.rpActive,  color: '#7c3aed', bg: '#ede9fe', border: '#7c3aed30', icon: '🏅', sub: 'Reward Pass activated' },
+                { key: 'rp-pending',   label: 'RP Pending',
                   value: merchantKPIs.rpPending === null
                     ? (allMerchantsLoading ? '…' : '–')
                     : merchantKPIs.rpPending,

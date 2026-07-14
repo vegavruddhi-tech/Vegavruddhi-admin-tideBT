@@ -250,18 +250,19 @@ function TLCard({ tl, onViewForm, dateFilter, fromDate, toDate, selectedYear, se
             </Typography>
           </Box>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+          <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>Team:</Typography>
           <Chip label={`${tl.fseCount} FSEs`} size="small"
             sx={{ bgcolor: '#e3f2fd', color: '#1565c0', fontWeight: 700, fontSize: 11, border: '1px solid #1565c030' }} />
           {forms.length > 0 && (
             <>
-              <Chip label={`${totalOnboarded} Onboarded`} size="small"
+              <Chip label={`${totalOnboarded} Merchants Onboarded`} size="small"
                 sx={{ bgcolor: '#e6f4ea', color: '#2e7d32', fontWeight: 700, fontSize: 11, border: '1px solid #2e7d3230' }} />
-              <Chip label={`${totalNotInterested} Rejected`} size="small"
+              <Chip label={`${totalNotInterested} Not Interested`} size="small"
                 sx={{ bgcolor: '#fdecea', color: '#c62828', fontWeight: 700, fontSize: 11, border: '1px solid #c6282830' }} />
             </>
           )}
-          <Chip label={`${filteredForms.length || '–'} forms`} size="small"
+          <Chip label={`${filteredForms.length || '–'} Visit Forms`} size="small"
             sx={{ bgcolor: '#e6f4ea', color: '#2e7d32', fontWeight: 700, fontSize: 11, border: '1px solid #2e7d3230' }} />
           {expanded ? <ExpandLessIcon sx={{ color: 'text.secondary' }} /> : <ExpandMoreIcon sx={{ color: 'text.secondary' }} />}
         </Box>
@@ -1067,17 +1068,19 @@ export default function TLOverview() {
 
       {/* BT Performance KPI Cards — all TLs combined */}
       {(() => {
-        const totalBT   = allMerchantsData.reduce((s,m) => s+(m.stage3||0), 0);
-        const rpActive  = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active').length;
-        const rpPending = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').length;
-        const btMerchants = allMerchantsData.filter(m => (m.stage3||0)>0).length;
+        const totalBT      = allMerchantsData.reduce((s,m) => s+(m.stage3||0), 0);
+        const yesterdaysBT = allMerchantsData.reduce((s,m) => s+(m.yesterdaysStage3||0), 0);
+        const rpActive     = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active').length;
+        const rpPending    = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').length;
+        const btMerchants  = allMerchantsData.filter(m => (m.stage3||0)>0).length;
         const kpis = [
-          { key:'bt-done',    label:'Total BT Completed', value: merchantsLoading?'…':`₹${totalBT.toLocaleString()}`, sub:`${btMerchants} merchants`, icon:'💰', color:'#e65100', bg:'#fff3e0', border:'#e6510030' },
-          { key:'rp-active',  label:'Total RP Active',    value: merchantsLoading?'…':rpActive, sub:'Reward Pass activated', icon:'🏅', color:'#7c3aed', bg:'#ede9fe', border:'#7c3aed30' },
-          { key:'rp-pending', label:'RP Pending',         value: merchantsLoading?'…':rpPending, sub:'BT ≥ ₹10k, RP not activated', icon:'🎁', color:'#92400e', bg:'#fef3c7', border:'#92400e30' },
+          { key:'bt-done',      label:'Total BT Completed', value: merchantsLoading?'…':`₹${totalBT.toLocaleString()}`,      sub:`${btMerchants} merchants`,   icon:'💰', color:'#e65100', bg:'#fff3e0', border:'#e6510030' },
+          { key:'yesterday-bt', label:"Yesterday's BT",     value: merchantsLoading?'…':`₹${yesterdaysBT.toLocaleString()}`, sub:'BT done yesterday',          icon:'📈', color:'#0369a1', bg:'#e0f2fe', border:'#0369a130' },
+          { key:'rp-active',    label:'Total RP Active',    value: merchantsLoading?'…':rpActive,                             sub:'Reward Pass activated',       icon:'🏅', color:'#7c3aed', bg:'#ede9fe', border:'#7c3aed30' },
+          { key:'rp-pending',   label:'RP Pending',         value: merchantsLoading?'…':rpPending,                            sub:'BT ≥ ₹10k, RP not activated', icon:'🎁', color:'#92400e', bg:'#fef3c7', border:'#92400e30' },
         ];
         return (
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 2, mb: 3 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 2, mb: 3 }}>
             {kpis.map(kpi => (
               <Card key={kpi.key} onClick={() => {
                 let drill = [];
