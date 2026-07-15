@@ -54,26 +54,27 @@ const MONTH_ABBR = {
   'SEPTEMBER': 'SEP', 'OCTOBER': 'OCT', 'NOVEMBER': 'NOV', 'DECEMBER': 'DEC'
 };
 
-// Helper: find BT_TL_CONNECT collection for a given month+year
-// Prefers canonical uppercase+space format over underscore/lowercase copies
+// Helper: find BT_TL_CONNECT collection — hardcoded canonical format "BT_TL_CONNECT [MONTH]"
 const findBTCollection = (allCollections, monthName, yearStr) => {
-  const mu    = monthName.toUpperCase();
-  const abbr  = MONTH_ABBR[mu] || mu;
-  const sy    = yearStr ? yearStr.slice(-2) : null;
-  const matchesMonth = cu => cu.includes(mu) || cu.includes(abbr);
-  // Sort: prefer space-separated uppercase names first (e.g. "BT_TL_CONNECT FEB" over "bt_tl_connect_feb")
-  const btCols = allCollections
-    .filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'))
-    .sort((a, b) => {
-      const aScore = (a.includes(' ') ? 2 : 0) + (a === a.toUpperCase() ? 1 : 0);
-      const bScore = (b.includes(' ') ? 2 : 0) + (b === b.toUpperCase() ? 1 : 0);
-      return bScore - aScore;
-    });
-  if (yearStr) {
-    const m = btCols.find(c => { const cu = c.toUpperCase(); return matchesMonth(cu) && (cu.includes(yearStr) || (sy && cu.includes(sy))); });
-    if (m) return m;
-  }
-  return btCols.find(c => matchesMonth(c.toUpperCase())) || null;
+  if (!monthName) return null;
+  const mu   = monthName.toUpperCase();
+  const MONTH_ABBR2 = {
+    'JANUARY':'JAN','FEBRUARY':'FEB','MARCH':'MAR','APRIL':'APR','MAY':'MAY','JUNE':'JUN',
+    'JULY':'JUL','AUGUST':'AUG','SEPTEMBER':'SEP','OCTOBER':'OCT','NOVEMBER':'NOV','DECEMBER':'DEC'
+  };
+  const abbr = MONTH_ABBR2[mu] || mu;
+
+  // Try canonical: "BT_TL_CONNECT JULY"
+  const canonical = `BT_TL_CONNECT ${mu}`;
+  if (allCollections.includes(canonical)) return canonical;
+
+  // Try abbreviation: "BT_TL_CONNECT JUL"
+  const canonicalAbbr = `BT_TL_CONNECT ${abbr}`;
+  if (allCollections.includes(canonicalAbbr)) return canonicalAbbr;
+
+  // Fallback: any matching BT_TL_CONNECT collection
+  const btCols = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
+  return btCols.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) || cu.includes(abbr); }) || null;
 };
 
 // Helper: compute cumulative carry-forward per person for all months before curMonth

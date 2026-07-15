@@ -2,28 +2,27 @@ const express = require('express');
 const router = express.Router();
 const { cacheGet, cacheSet, cacheKey, cacheInvalidate } = require('../utils/cache');
 
-// Helper: find BT_TL_CONNECT collection, preferring canonical uppercase+space format
-// e.g. "BT_TL_CONNECT FEB" over "bt_tl_connect_feb" (which may be old/empty)
+// Helper: find BT_TL_CONNECT collection — hardcoded canonical format "BT_TL_CONNECT [MONTH]"
+// e.g. selectedMonth="July" → looks for "BT_TL_CONNECT JULY" first.
+// Falls back to abbreviation "BT_TL_CONNECT JUL" and then any matching collection.
 function findBTCollection(allCollections, selectedMonth, selectedYear) {
   if (!selectedMonth) return null;
-  const btCollections = allCollections
-    .filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'))
-    .sort((a, b) => {
-      // Prefer space-separated uppercase names (canonical format with actual data)
-      const aScore = (a.includes(' ') ? 2 : 0) + (a === a.toUpperCase() ? 1 : 0);
-      const bScore = (b.includes(' ') ? 2 : 0) + (b === b.toUpperCase() ? 1 : 0);
-      return bScore - aScore;
-    });
-  const mu = selectedMonth.toUpperCase();
+  const mu = selectedMonth.toUpperCase(); // e.g. "JULY"
   const ABBR = { 'JANUARY':'JAN','FEBRUARY':'FEB','MARCH':'MAR','APRIL':'APR','MAY':'MAY','JUNE':'JUN','JULY':'JUL','AUGUST':'AUG','SEPTEMBER':'SEP','OCTOBER':'OCT','NOVEMBER':'NOV','DECEMBER':'DEC' };
-  const abbr = ABBR[mu] || mu;
+  const abbr = ABBR[mu] || mu; // e.g. "JUL"
+
+  // Try canonical name first: "BT_TL_CONNECT JULY"
+  const canonical = `BT_TL_CONNECT ${mu}`;
+  if (allCollections.includes(canonical)) return canonical;
+
+  // Try abbreviation: "BT_TL_CONNECT JUL"
+  const canonicalAbbr = `BT_TL_CONNECT ${abbr}`;
+  if (allCollections.includes(canonicalAbbr)) return canonicalAbbr;
+
+  // Fallback: any collection starting with BT_TL_CONNECT that contains the month name/abbr
+  const btCols = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
   const matchesMonth = (cu) => cu.includes(mu) || cu.includes(abbr);
-  if (selectedYear) {
-    const yr = String(selectedYear); const sy = yr.slice(-2);
-    const m = btCollections.find(c => { const cu = c.toUpperCase(); return matchesMonth(cu) && (cu.includes(yr) || cu.includes(sy)); });
-    if (m) return m;
-  }
-  return btCollections.find(c => matchesMonth(c.toUpperCase())) || null;
+  return btCols.find(c => matchesMonth(c.toUpperCase())) || null;
 }
 
 // GET /api/fse - Get all FSEs with Tide BT access
