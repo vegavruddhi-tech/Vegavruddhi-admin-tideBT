@@ -23,6 +23,9 @@ export default function FundTransfer() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().toLocaleString('en-US', { month: 'long' }));
   const [selectedTlFilter, setSelectedTlFilter] = useState('');
   const [selectedFseFilter, setSelectedFseFilter] = useState('');
+  // Payment History filters
+  const [paymentSenderFilter, setPaymentSenderFilter] = useState('');
+  const [paymentReceiverFilter, setPaymentReceiverFilter] = useState('');
 
   // Data
   const [fses, setFses] = useState([]);
@@ -429,64 +432,102 @@ export default function FundTransfer() {
         <Grid item xs={12} md={7}>
           <Card sx={{ borderRadius: 2, border: '1.5px solid #e0e0e0' }}>
             <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={1}>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5} flexWrap="wrap" gap={1}>
                 <Typography variant="h6" fontWeight={700}>Payment History</Typography>
                 <Chip label={`Total: ₹${totalAmount.toLocaleString()}`} sx={{ bgcolor: '#e6f4ea', color: '#2e7d32', fontWeight: 700 }} />
               </Box>
 
-              {filteredPayments.length === 0 ? (
-                <Typography color="text.secondary" textAlign="center" py={4}>No payments recorded yet</Typography>
-              ) : (
-                <TableContainer sx={{ maxHeight: 500 }}>
-                  <Table size="small" stickyHeader>
-                    <TableHead>
-                      <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'text.secondary' } }}>
-                        <TableCell>#</TableCell>
-                        <TableCell>Sender</TableCell>
-                        <TableCell>Receiver</TableCell>
-                        <TableCell>Type</TableCell>
-                        <TableCell>Amount</TableCell>
-                        <TableCell>Method</TableCell>
-                        <TableCell>Date</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {filteredPayments.map((p, i) => {
-                        const isReturn = (p.amount || 0) < 0;
-                        return (
-                        <TableRow key={i} hover sx={{ bgcolor: isReturn ? '#fff5f5' : 'inherit' }}>
-                          <TableCell>{i + 1}</TableCell>
-                          <TableCell sx={{ fontWeight: 600, color: isReturn ? '#c62828' : 'inherit' }}>
-                            {isReturn ? p.transferTo : p.senderName || '-'}
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 600, color: isReturn ? '#888' : 'inherit' }}>
-                            {isReturn ? p.senderName : p.transferTo || '-'}
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={isReturn ? 'Return' : (p.transferToWhom === "TL's & Managers" ? 'TL/Mgr' : 'FSE')}
-                              size="small"
-                              sx={{
-                                bgcolor: isReturn ? '#fdecea' : (p.transferToWhom === "TL's & Managers" ? '#e3f2fd' : '#e6f4ea'),
-                                color:   isReturn ? '#c62828' : (p.transferToWhom === "TL's & Managers" ? '#1565c0' : '#2e7d32'),
-                                fontWeight: 700, fontSize: 10
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 700, color: isReturn ? '#c62828' : '#2e7d32' }}>
-                            {isReturn ? '↩ ' : ''}₹{Math.abs(p.amount || 0).toLocaleString()}
-                          </TableCell>
-                          <TableCell>{p.paymentDoneOn || '-'}</TableCell>
-                          <TableCell sx={{ fontSize: 12 }}>
-                            {p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-'}
-                          </TableCell>
-                        </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
+              {/* Sender / Receiver filters */}
+              {(() => {
+                const uniqueSenders   = [...new Set(payments.map(p => (p.senderName || '').trim()).filter(Boolean))].sort();
+                const uniqueReceivers = [...new Set(payments.map(p => (p.transferTo || '').trim()).filter(Boolean))].sort();
+                const historyPayments = filteredPayments.filter(p => {
+                  const sender   = (p.senderName   || '').trim();
+                  const receiver = (p.transferTo   || '').trim();
+                  if (paymentSenderFilter   && sender   !== paymentSenderFilter)   return false;
+                  if (paymentReceiverFilter && receiver !== paymentReceiverFilter) return false;
+                  return true;
+                });
+                return (
+                  <>
+                    <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
+                      <TextField select size="small" label="Sender" value={paymentSenderFilter}
+                        onChange={e => setPaymentSenderFilter(e.target.value)} sx={{ minWidth: 160 }}>
+                        <MenuItem value="">All Senders</MenuItem>
+                        {uniqueSenders.map(s => <MenuItem key={s} value={s}>{s}</MenuItem>)}
+                      </TextField>
+                      <TextField select size="small" label="Receiver" value={paymentReceiverFilter}
+                        onChange={e => setPaymentReceiverFilter(e.target.value)} sx={{ minWidth: 160 }}>
+                        <MenuItem value="">All Receivers</MenuItem>
+                        {uniqueReceivers.map(r => <MenuItem key={r} value={r}>{r}</MenuItem>)}
+                      </TextField>
+                      {(paymentSenderFilter || paymentReceiverFilter) && (
+                        <Button size="small" onClick={() => { setPaymentSenderFilter(''); setPaymentReceiverFilter(''); }}
+                          sx={{ color: '#c62828', fontSize: 11, textTransform: 'none' }}>
+                          Clear ✕
+                        </Button>
+                      )}
+                      <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', ml: 'auto' }}>
+                        {historyPayments.length} of {filteredPayments.length} payments
+                      </Typography>
+                    </Box>
+
+                    {historyPayments.length === 0 ? (
+                      <Typography color="text.secondary" textAlign="center" py={4}>No payments found</Typography>
+                    ) : (
+                      <TableContainer sx={{ maxHeight: 500 }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow sx={{ '& th': { fontWeight: 700, fontSize: 11, textTransform: 'uppercase', color: 'text.secondary' } }}>
+                              <TableCell>#</TableCell>
+                              <TableCell>Sender</TableCell>
+                              <TableCell>Receiver</TableCell>
+                              <TableCell>Type</TableCell>
+                              <TableCell>Amount</TableCell>
+                              <TableCell>Method</TableCell>
+                              <TableCell>Date</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {historyPayments.map((p, i) => {
+                              const isReturn = (p.amount || 0) < 0;
+                              return (
+                              <TableRow key={i} hover sx={{ bgcolor: isReturn ? '#fff5f5' : 'inherit' }}>
+                                <TableCell>{i + 1}</TableCell>
+                                <TableCell sx={{ fontWeight: 600, color: isReturn ? '#c62828' : 'inherit' }}>
+                                  {isReturn ? p.transferTo : p.senderName || '-'}
+                                </TableCell>
+                                <TableCell sx={{ fontWeight: 600, color: isReturn ? '#888' : 'inherit' }}>
+                                  {isReturn ? p.senderName : p.transferTo || '-'}
+                                </TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={isReturn ? 'Return' : (p.transferToWhom === "TL's & Managers" ? 'TL/Mgr' : 'FSE')}
+                                    size="small"
+                                    sx={{
+                                      bgcolor: isReturn ? '#fdecea' : (p.transferToWhom === "TL's & Managers" ? '#e3f2fd' : '#e6f4ea'),
+                                      color:   isReturn ? '#c62828' : (p.transferToWhom === "TL's & Managers" ? '#1565c0' : '#2e7d32'),
+                                      fontWeight: 700, fontSize: 10
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell sx={{ fontWeight: 700, color: isReturn ? '#c62828' : '#2e7d32' }}>
+                                  {isReturn ? '↩ ' : ''}₹{Math.abs(p.amount || 0).toLocaleString()}
+                                </TableCell>
+                                <TableCell>{p.paymentDoneOn || '-'}</TableCell>
+                                <TableCell sx={{ fontSize: 12 }}>
+                                  {p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-'}
+                                </TableCell>
+                              </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </>
+                );
+              })()}
             </CardContent>
           </Card>
         </Grid>
