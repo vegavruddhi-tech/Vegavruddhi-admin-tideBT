@@ -612,7 +612,11 @@ router.get('/usage-summary', async (req, res) => {
 
       // totalAvailable = carryForward + received (positive only)
       // For TL: also subtract what they sent to FSEs from received
-      const effectiveReceived = isTL ? Math.max(0, received - sentToFSEs) : received;
+      // For TLs: effectiveReceived = received - sent to FSEs.
+      // If TL distributed fund to FSEs but received nothing this month,
+      // the distribution comes from carry forward — so it reduces available.
+      // Do NOT clamp to 0 here; the carry forward will cover it.
+      const effectiveReceived = isTL ? (received - sentToFSEs) : received;
       const totalAvailable = carryFwd + effectiveReceived;
 
       // Fund Left = totalAvailable - deductions (returns) - BT/RP costs
