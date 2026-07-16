@@ -561,9 +561,27 @@ router.get('/usage-summary', async (req, res) => {
       const openingBalances = await db.collection('TideBT_OpeningBalances').find({}).toArray();
       openingBalances.forEach(b => {
         const nameLower = (b.name || '').trim().toLowerCase();
-        if (nameLower && nameLower !== '0') {
-          carryMap[nameLower] = Math.round(b.openingBalance || 0);
+        if (!nameLower || nameLower === '0') return;
+        const bal = Math.round(b.openingBalance || 0);
+        if (bal <= 0) return; // skip zero/negative
+
+        // For TL-type records: only apply to names classified as TL in nameRoleMap
+        // For FSE-type records: only apply to names classified as FSE in nameRoleMap
+        // This prevents FSE opening balances from appearing under TL entries and vice versa
+        const roleInSummary = nameRoleMap[
+          names.find(n => n.toLowerCase().trim() === nameLower) || ''
+        ];
+        const obType = (b.type || '').toUpperCase();
+
+        if (obType === 'TL' && roleInSummary === "TL's & Managers") {
+          carryMap[nameLower] = bal;
+        } else if (obType === 'FSE' && roleInSummary === "FSE Ground Team") {
+          carryMap[nameLower] = bal;
+        } else if (!obType) {
+          // No type field — apply to whoever matches the name
+          carryMap[nameLower] = bal;
         }
+        // else: type mismatch (TL ob for FSE name or vice versa) — skip
       });
       console.log(`[Carry Forward] Loaded ${Object.keys(carryMap).length} entries from TideBT_OpeningBalances for ${OPENING_BALANCE_MONTH} ${OPENING_BALANCE_YEAR}`);
     } else {
