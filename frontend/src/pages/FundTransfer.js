@@ -309,9 +309,9 @@ export default function FundTransfer() {
     }
   }, [transferToWhom, fses, tls]);
 
-  // Sender list (Admin and Accountant only)
+  // Sender list
   const senderList = useMemo(() => {
-    return ['Admin', 'Accountant'];
+    return ['Admin', 'VV'];
   }, []);
 
   if (loading) {
