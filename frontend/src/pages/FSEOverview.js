@@ -399,25 +399,38 @@ export default function FSEOverview() {
 
   // ── Merchant KPI computations ─────────────────────────────────────────
   const merchantKPIs = useMemo(() => {
-    if (allMerchantsData.length > 0) {
+    // When search is active, show KPIs only for matched FSEs
+    const matchedFSENames = search
+      ? new Set(merchantData.filter(d => d.fseName.toLowerCase().includes(search.toLowerCase())).map(d => d.fseName))
+      : null;
+    const filteredData = allMerchantsData.length > 0
+      ? (matchedFSENames ? allMerchantsData.filter(m => matchedFSENames.has(m.fseName)) : allMerchantsData)
+      : [];
+
+    if (filteredData.length > 0 || allMerchantsData.length > 0) {
+      const data = filteredData.length > 0 ? filteredData : allMerchantsData;
       return {
-        totalBT:      allMerchantsData.reduce((s,m) => s+(m.stage3||0), 0),
-        yesterdaysBT: allMerchantsData.reduce((s,m) => s+(m.yesterdaysStage3||0), 0),
-        rpActive:     allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active').length,
-        btPending:    allMerchantsData.filter(m => (m.stage3||0)===0).length,
-        rpPending:    allMerchantsData.filter(m => (m.stage3||0) >= 10000 && (m.rewardPassPro||'').toLowerCase()!=='active').length,
-        all: allMerchantsData
+        totalBT:      data.reduce((s,m) => s+(m.stage3||0), 0),
+        yesterdaysBT: data.reduce((s,m) => s+(m.yesterdaysStage3||0), 0),
+        rpActive:     data.filter(m => (m.rewardPassPro||'').toLowerCase()==='active').length,
+        btPending:    data.filter(m => (m.stage3||0)===0).length,
+        rpPending:    data.filter(m => (m.stage3||0) >= 10000 && (m.rewardPassPro||'').toLowerCase()!=='active').length,
+        all: data
       };
     }
+    // Fallback to summary data
+    const matchedMerchantData = search
+      ? merchantData.filter(d => d.fseName.toLowerCase().includes(search.toLowerCase()))
+      : merchantData;
     return {
-      totalBT:      merchantData.reduce((s,f) => s+(f.metrics.totalBT||0), 0),
+      totalBT:      matchedMerchantData.reduce((s,f) => s+(f.metrics.totalBT||0), 0),
       yesterdaysBT: 0,
-      rpActive:     merchantData.reduce((s,f) => s+(f.metrics.rpDone||0), 0),
-      btPending:    merchantData.reduce((s,f) => s+(f.metrics.total-(f.metrics.btDone||0)), 0),
+      rpActive:     matchedMerchantData.reduce((s,f) => s+(f.metrics.rpDone||0), 0),
+      btPending:    matchedMerchantData.reduce((s,f) => s+(f.metrics.total-(f.metrics.btDone||0)), 0),
       rpPending: null,
       all: []
     };
-  }, [merchantData, allMerchantsData]);
+  }, [merchantData, allMerchantsData, search]);
 
   // Get drill-down merchants for selected KPI — uses allMerchantsData (single endpoint)
   const kpiDrillMerchants = useMemo(() => {
