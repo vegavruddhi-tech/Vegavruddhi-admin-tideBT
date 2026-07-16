@@ -1,19 +1,24 @@
 const express = require('express');
 const router = express.Router();
 
-// Helper: find BT_TL_CONNECT collection for a month+year
+// Helper: find BT_TL_CONNECT collection — hardcoded canonical format "BT_TL_CONNECT [MONTH]"
 const findBTCollection = (allCollections, monthName, yearStr) => {
+  if (!monthName) return null;
   const ABBR = { 'JANUARY':'JAN','FEBRUARY':'FEB','MARCH':'MAR','APRIL':'APR','MAY':'MAY','JUNE':'JUN','JULY':'JUL','AUGUST':'AUG','SEPTEMBER':'SEP','OCTOBER':'OCT','NOVEMBER':'NOV','DECEMBER':'DEC' };
   const mu   = (monthName || '').toUpperCase();
   const abbr = ABBR[mu] || mu;
+
+  // Try canonical: "BT_TL_CONNECT JULY"
+  const canonical = `BT_TL_CONNECT ${mu}`;
+  if (allCollections.includes(canonical)) return canonical;
+
+  // Try abbreviation: "BT_TL_CONNECT JUL"
+  const canonicalAbbr = `BT_TL_CONNECT ${abbr}`;
+  if (allCollections.includes(canonicalAbbr)) return canonicalAbbr;
+
+  // Fallback: any matching BT_TL_CONNECT collection
   const btCols = allCollections.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
-  const matchesMonth = cu => cu.includes(mu) || cu.includes(abbr);
-  if (yearStr) {
-    const sy = String(yearStr).slice(-2);
-    const m  = btCols.find(c => { const cu = c.toUpperCase(); return matchesMonth(cu) && (cu.includes(String(yearStr)) || cu.includes(sy)); });
-    if (m) return m;
-  }
-  return btCols.find(c => matchesMonth(c.toUpperCase())) || null;
+  return btCols.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) || cu.includes(abbr); }) || null;
 };
 
 // Helper: get BT achieved for a person (FSE or TL) for a given month+year
