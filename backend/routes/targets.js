@@ -21,15 +21,14 @@ const findBTCollection = (allCollections, monthName, yearStr) => {
   return btCols.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) || cu.includes(abbr); }) || null;
 };
 
-// Helper: get BT achieved for a person (FSE or TL) for a given month+year
-const getBTAchieved = async (db, name, month, year) => {
+// Helper: get BT achieved for a person (FSE or TL) for a given month+year, minus baseline
+const getBTAchieved = async (db, name, month, year, btBaseline = 0) => {
   try {
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
     const btCol = findBTCollection(allCollections, month, year);
     if (!btCol) return 0;
 
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Get merchant numbers from bt_master for this FSE/TL
     const masterDocs = await db.collection('bt_master').find({
       fseName: { $regex: new RegExp(`^\\s*${escape(name.trim())}\\s*\\d*\\s*$`, 'i') }
     }, { projection: { merchantNumber: 1 } }).toArray();
@@ -40,7 +39,9 @@ const getBTAchieved = async (db, name, month, year) => {
       { merchantNumber: { $in: nums } },
       { projection: { stage3: 1 } }
     ).toArray();
-    return btDocs.reduce((s, d) => s + (parseFloat(String(d.stage3 || '0').replace(/,/g,'')) || 0), 0);
+    const total = btDocs.reduce((s, d) => s + (parseFloat(String(d.stage3 || '0').replace(/,/g,'')) || 0), 0);
+    // Subtract baseline so only incremental BT since target creation counts
+    return Math.max(0, total - btBaseline);
   } catch { return 0; }
 };
 
@@ -63,28 +64,26 @@ router.get('/', async (req, res) => {
       const allCollections = (await db.listCollections().toArray()).map(c => c.name);
       const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-      // Group targets by (person, month, year) to avoid duplicate DB queries
+      // Build a cache of stage3 per (person, month, year) — one DB query per unique combo
       const groupKey = t => `${(t.targetFor||'').toLowerCase()}__${t.month}__${t.year}`;
       const uniqueGroups = {};
       targets.forEach(t => { uniqueGroups[groupKey(t)] = { name: t.targetFor, month: t.month, year: t.year }; });
 
-      // Fetch BT achieved for each unique group in parallel
-      const achievedMap = {};
+      // Fetch total stage3 per group (raw cumulative value)
+      const rawStage3Map = {};  // groupKey → total stage3
       await Promise.all(Object.entries(uniqueGroups).map(async ([key, g]) => {
         const btCol = findBTCollection(allCollections, g.month, String(g.year));
-        if (!btCol) { achievedMap[key] = 0; return; }
-
+        if (!btCol) { rawStage3Map[key] = 0; return; }
         const masterDocs = await db.collection('bt_master').find({
           fseName: { $regex: new RegExp(`^\\s*${escape((g.name||'').trim())}\\s*\\d*\\s*$`, 'i') }
         }, { projection: { merchantNumber: 1, _id: 0 } }).toArray();
         const nums = masterDocs.map(m => (m.merchantNumber||'').trim()).filter(Boolean);
-        if (nums.length === 0) { achievedMap[key] = 0; return; }
-
+        if (nums.length === 0) { rawStage3Map[key] = 0; return; }
         const btDocs = await db.collection(btCol).find(
           { merchantNumber: { $in: nums } },
           { projection: { stage3: 1, _id: 0 } }
         ).toArray();
-        achievedMap[key] = btDocs.reduce((s, d) => s + (parseFloat(String(d.stage3||'0').replace(/,/g,''))||0), 0);
+        rawStage3Map[key] = btDocs.reduce((s, d) => s + (parseFloat(String(d.stage3||'0').replace(/,/g,''))||0), 0);
       }));
 
       // Also get RP achieved (rewardPassPro === 'active')
@@ -106,12 +105,16 @@ router.get('/', async (req, res) => {
         ).length;
       }));
 
-      // Attach achievement to each target
-      const enriched = targets.map(t => ({
-        ...t,
-        btAchieved: achievedMap[groupKey(t)] || 0,
-        rpAchieved: rpAchievedMap[groupKey(t)] || 0,
-      }));
+      // Attach achievement to each target — subtract btBaseline for incremental calculation
+      const enriched = targets.map(t => {
+        const rawBT = rawStage3Map[groupKey(t)] || 0;
+        const baseline = t.btBaseline || 0; // 0 for old targets (backward compatible)
+        return {
+          ...t,
+          btAchieved: Math.max(0, rawBT - baseline), // incremental BT since target creation
+          rpAchieved: rpAchievedMap[groupKey(t)] || 0,
+        };
+      });
       return res.json({ success: true, targets: enriched });
     }
 
@@ -189,6 +192,32 @@ router.post('/', async (req, res) => {
     const cf = parseFloat(carryForward) || 0;
     const totalBtTarget = parseFloat(btTarget) + cf;
 
+    // ── Baseline: capture current stage3 for this FSE at time of target creation ──
+    // This allows incremental achievement calculation for consecutive targets.
+    // Achievement = current stage3 - btBaseline (so only new BT counts for this target)
+    let btBaseline = 0;
+    try {
+      const allCollections = (await db.listCollections().toArray()).map(c => c.name);
+      const btCol = findBTCollection(allCollections, month, String(year));
+      if (btCol) {
+        const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const masterDocs = await db.collection('bt_master').find({
+          fseName: { $regex: new RegExp(`^\\s*${escape((targetFor||'').trim())}\\s*\\d*\\s*$`, 'i') }
+        }, { projection: { merchantNumber: 1, _id: 0 } }).toArray();
+        const nums = masterDocs.map(m => (m.merchantNumber||'').trim()).filter(Boolean);
+        if (nums.length > 0) {
+          const btDocs = await db.collection(btCol).find(
+            { merchantNumber: { $in: nums } },
+            { projection: { stage3: 1, _id: 0 } }
+          ).toArray();
+          btBaseline = btDocs.reduce((s, d) => s + (parseFloat(String(d.stage3||'0').replace(/,/g,''))||0), 0);
+        }
+      }
+      console.log(`[Target Baseline] ${targetFor} for ${month} ${year}: btBaseline = ₹${btBaseline.toLocaleString()}`);
+    } catch (bErr) {
+      console.warn('Baseline calculation failed (non-fatal):', bErr.message);
+    }
+
     const target = {
       targetFor,
       targetRole: targetRole || 'FSE',
@@ -202,6 +231,7 @@ router.post('/', async (req, res) => {
       year: parseInt(year),
       startDate: startDate || null,
       endDate: endDate || null,
+      btBaseline,  // baseline stage3 at time of target creation
       createdAt: new Date()
     };
 
