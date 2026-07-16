@@ -299,7 +299,8 @@ export default function FSEOverview() {
   const [loadingFSE, setLoadingFSE] = useState({}); // { fseName: bool }
 
   const fetchFSEMerchants = useCallback(async (fseName) => {
-    if (fseMerchants[fseName]) return; // already loaded
+    // Only skip if we have actual data — empty array means may need retry
+    if (fseMerchants[fseName] && fseMerchants[fseName].length > 0) return;
     setLoadingFSE(p => ({ ...p, [fseName]: true }));
     try {
       const params = new URLSearchParams();
@@ -720,9 +721,7 @@ export default function FSEOverview() {
             .map(fseRow => {
               const isOpen = expandedFSE === fseRow.fseName;
               const m = fseRow.metrics;
-              const merchants = (fseMerchants[fseRow.fseName] || []).filter(mer =>
-                !search || mer.merchantName.toLowerCase().includes(search.toLowerCase()) || mer.merchantNumber.includes(search)
-              );
+              const merchants = (fseMerchants[fseRow.fseName] || []);
               return (
                 <Card key={fseRow.fseName} sx={{ mb: 2, border: '1.5px solid #c8e6c9', borderRadius: 2 }}>
                   {/* FSE Header */}

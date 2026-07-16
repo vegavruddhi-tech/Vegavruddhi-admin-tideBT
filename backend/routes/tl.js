@@ -109,19 +109,25 @@ router.get('/:name', async (req, res) => {
 
 const { cacheGet, cacheSet, cacheKey, cacheInvalidate } = require('../utils/cache');
 
-// Helper: find BT_TL_CONNECT collection for month/year
+// Helper: find BT_TL_CONNECT collection — hardcoded canonical format "BT_TL_CONNECT [MONTH]"
 async function findBTCollection(db, selectedMonth, selectedYear) {
   if (!selectedMonth) return null;
   const all = (await db.listCollections().toArray()).map(c => c.name);
-  // Only use BT_TL_CONNECT* collections — never tl_connect_*
-  const btCols  = all.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
-  const mu  = selectedMonth.toUpperCase();
-  if (selectedYear) {
-    const yr = String(selectedYear); const sy = yr.slice(-2);
-    const m = btCols.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) && (cu.includes(yr)||cu.includes(sy)); });
-    if (m) return m;
-  }
-  return btCols.find(c => c.toUpperCase().includes(mu)) || null;
+  const mu = selectedMonth.toUpperCase();
+  const ABBR = { 'JANUARY':'JAN','FEBRUARY':'FEB','MARCH':'MAR','APRIL':'APR','MAY':'MAY','JUNE':'JUN','JULY':'JUL','AUGUST':'AUG','SEPTEMBER':'SEP','OCTOBER':'OCT','NOVEMBER':'NOV','DECEMBER':'DEC' };
+  const abbr = ABBR[mu] || mu;
+
+  // Try canonical: "BT_TL_CONNECT JULY"
+  const canonical = `BT_TL_CONNECT ${mu}`;
+  if (all.includes(canonical)) return canonical;
+
+  // Try abbreviation: "BT_TL_CONNECT JUL"
+  const canonicalAbbr = `BT_TL_CONNECT ${abbr}`;
+  if (all.includes(canonicalAbbr)) return canonicalAbbr;
+
+  // Fallback: any matching BT_TL_CONNECT collection
+  const btCols = all.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
+  return btCols.find(c => { const cu = c.toUpperCase(); return cu.includes(mu) || cu.includes(abbr); }) || null;
 }
 
 // Helper: enrich merchants with BT/RP data
