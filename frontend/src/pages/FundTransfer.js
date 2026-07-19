@@ -2,9 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box, Typography, Card, CardContent, Button, TextField, MenuItem,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, CircularProgress, Alert, Grid, Autocomplete, Tabs, Tab, Tooltip, IconButton
+  Chip, CircularProgress, Alert, Grid, Autocomplete, Tabs, Tab, Tooltip, IconButton,
+  Dialog, DialogTitle, DialogContent, DialogActions, DialogContentText
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import DateFilter from '../components/DateFilter';
 import axios from 'axios';
 
@@ -42,11 +45,19 @@ export default function FundTransfer() {
   const [transferTo, setTransferTo] = useState('');
   const [amount, setAmount] = useState('');
   const [paymentDoneOn, setPaymentDoneOn] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]); // default today
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const [roleFilter, setRoleFilter] = useState('all');
+
+  // Edit / Delete state
+  const [editPayment, setEditPayment] = useState(null); // payment being edited
+  const [editFields, setEditFields] = useState({});     // editable fields
+  const [editSaving, setEditSaving] = useState(false);
+  const [deletePayment, setDeletePayment] = useState(null); // payment to confirm delete
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [reportingPeriod, setReportingPeriod] = useState('');
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [bustingCache, setBustingCache] = useState(false);
@@ -269,6 +280,7 @@ export default function FundTransfer() {
     e.preventDefault();
     setError(''); setSuccess('');
     if (!paymentDoneOn) { setError('Please select Payment method.'); return; }
+    if (!paymentDate) { setError('Please select Payment Date.'); return; }
 
     const payload = {
       transferToWhom,
@@ -276,6 +288,7 @@ export default function FundTransfer() {
       transferTo,
       amount: parseFloat(amount),
       paymentDoneOn,
+      paymentDate, // actual date of payment (allows backdating)
     };
 
     setSubmitting(true);
@@ -297,7 +310,7 @@ export default function FundTransfer() {
 
   const handleClear = () => {
     setTransferToWhom(''); setSenderName(''); setTransferTo('');
-    setAmount(''); setPaymentDoneOn(''); setStep(1); setError('');
+    setAmount(''); setPaymentDoneOn(''); setPaymentDate(new Date().toISOString().split('T')[0]); setStep(1); setError('');
   };
 
   // Get receiver list based on transferToWhom
@@ -313,6 +326,50 @@ export default function FundTransfer() {
   const senderList = useMemo(() => {
     return ['Admin', 'VV'];
   }, []);
+
+  // Open edit modal
+  const handleEditOpen = (p) => {
+    setEditPayment(p);
+    setEditFields({
+      senderName:     p.senderName     || '',
+      transferTo:     p.transferTo     || '',
+      transferToWhom: p.transferToWhom || '',
+      amount:         p.amount         || '',
+      paymentDoneOn:  p.paymentDoneOn  || '',
+      paymentDate:    p.createdAt ? new Date(p.createdAt).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+    });
+  };
+
+  const handleEditSave = async () => {
+    if (!editPayment?._id) return;
+    setEditSaving(true);
+    try {
+      await axios.put(`${API_URL}/fund-transfer/${editPayment._id}`, editFields);
+      setEditPayment(null);
+      fetchData();
+      // Bust summary cache so numbers update
+      await axios.post(`${API_URL}/fund-transfer/cache/bust`).catch(() => {});
+    } catch (err) {
+      alert(err.response?.data?.message || 'Edit failed');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deletePayment?._id) return;
+    setDeleteLoading(true);
+    try {
+      await axios.delete(`${API_URL}/fund-transfer/${deletePayment._id}`);
+      setDeletePayment(null);
+      fetchData();
+      await axios.post(`${API_URL}/fund-transfer/cache/bust`).catch(() => {});
+    } catch (err) {
+      alert(err.response?.data?.message || 'Delete failed');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
 
   if (loading) {
     return <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px"><CircularProgress /></Box>;
@@ -389,20 +446,31 @@ export default function FundTransfer() {
 
                 {/* Step 3 */}
                 {step === 3 && (
-                  <TextField select fullWidth label="Payment done on *" value={paymentDoneOn}
-                    onChange={e => setPaymentDoneOn(e.target.value)} sx={{ mb: 2 }}>
-                    <MenuItem value="">Choose</MenuItem>
-                    {transferToWhom === "TL's & Managers" ? (
-                      [<MenuItem key="upi" value="UPI">UPI</MenuItem>,
-                       <MenuItem key="cash" value="Cash">Cash</MenuItem>,
-                       <MenuItem key="bank" value="Bank Transfer">Bank Transfer</MenuItem>,
-                       <MenuItem key="cheque" value="Cheque">Cheque</MenuItem>]
-                    ) : (
-                      [<MenuItem key="qr" value="QR">QR</MenuItem>,
-                       <MenuItem key="bank" value="Bank Account">Bank Account</MenuItem>,
-                       <MenuItem key="upi" value="UPI">UPI</MenuItem>]
-                    )}
-                  </TextField>
+                  <>
+                    <TextField
+                      type="date" fullWidth label="Payment Date *"
+                      value={paymentDate}
+                      onChange={e => setPaymentDate(e.target.value)}
+                      InputLabelProps={{ shrink: true }}
+                      inputProps={{ max: new Date().toISOString().split('T')[0] }}
+                      sx={{ mb: 2 }}
+                      helperText="Backdating allowed — enter actual payment date"
+                    />
+                    <TextField select fullWidth label="Payment Method *" value={paymentDoneOn}
+                      onChange={e => setPaymentDoneOn(e.target.value)} sx={{ mb: 2 }}>
+                      <MenuItem value="">Choose</MenuItem>
+                      {transferToWhom === "TL's & Managers" ? (
+                        [<MenuItem key="upi" value="UPI">UPI</MenuItem>,
+                         <MenuItem key="cash" value="Cash">Cash</MenuItem>,
+                         <MenuItem key="bank" value="Bank Transfer">Bank Transfer</MenuItem>,
+                         <MenuItem key="cheque" value="Cheque">Cheque</MenuItem>]
+                      ) : (
+                        [<MenuItem key="qr" value="QR">QR</MenuItem>,
+                         <MenuItem key="bank" value="Bank Account">Bank Account</MenuItem>,
+                         <MenuItem key="upi" value="UPI">UPI</MenuItem>]
+                      )}
+                    </TextField>
+                  </>
                 )}
 
                 {/* Buttons */}
@@ -486,6 +554,7 @@ export default function FundTransfer() {
                               <TableCell>Amount</TableCell>
                               <TableCell>Method</TableCell>
                               <TableCell>Date</TableCell>
+                              <TableCell>Actions</TableCell>
                             </TableRow>
                           </TableHead>
                           <TableBody>
@@ -517,6 +586,20 @@ export default function FundTransfer() {
                                 <TableCell>{p.paymentDoneOn || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: 12 }}>
                                   {p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-'}
+                                </TableCell>
+                                <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                                  <Tooltip title="Edit">
+                                    <IconButton size="small" onClick={() => handleEditOpen(p)}
+                                      sx={{ color: '#1565c0', p: 0.5, mr: 0.5 }}>
+                                      <EditIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                  <Tooltip title="Delete">
+                                    <IconButton size="small" onClick={() => setDeletePayment(p)}
+                                      sx={{ color: '#c62828', p: 0.5 }}>
+                                      <DeleteIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
                                 </TableCell>
                               </TableRow>
                               );
@@ -811,6 +894,68 @@ export default function FundTransfer() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* ── Edit Payment Dialog ── */}
+      <Dialog open={!!editPayment} onClose={() => setEditPayment(null)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>✏️ Edit Payment</DialogTitle>
+        <DialogContent>
+          <TextField select fullWidth label="Transfer to Whom" value={editFields.transferToWhom || ''}
+            onChange={e => setEditFields(f => ({ ...f, transferToWhom: e.target.value }))} sx={{ mt: 1, mb: 2 }}>
+            <MenuItem value="TL's & Managers">TL's & Managers</MenuItem>
+            <MenuItem value="FSE Ground Team">FSE Ground Team</MenuItem>
+          </TextField>
+          <TextField select fullWidth label="Sender Name" value={editFields.senderName || ''}
+            onChange={e => setEditFields(f => ({ ...f, senderName: e.target.value }))} sx={{ mb: 2 }}>
+            <MenuItem value="Admin">Admin</MenuItem>
+            <MenuItem value="VV">VV</MenuItem>
+            {tls.map(tl => <MenuItem key={tl.name} value={tl.name}>{tl.name}</MenuItem>)}
+          </TextField>
+          <TextField fullWidth label="Receiver" value={editFields.transferTo || ''}
+            onChange={e => setEditFields(f => ({ ...f, transferTo: e.target.value }))} sx={{ mb: 2 }} />
+          <TextField fullWidth type="number" label="Amount" value={editFields.amount || ''}
+            onChange={e => setEditFields(f => ({ ...f, amount: e.target.value }))} sx={{ mb: 2 }}
+            helperText="Use negative value for fund return/deduction" />
+          <TextField fullWidth label="Payment Method" value={editFields.paymentDoneOn || ''}
+            onChange={e => setEditFields(f => ({ ...f, paymentDoneOn: e.target.value }))} sx={{ mb: 2 }} />
+          <TextField type="date" fullWidth label="Payment Date"
+            value={editFields.paymentDate || ''}
+            onChange={e => setEditFields(f => ({ ...f, paymentDate: e.target.value }))}
+            InputLabelProps={{ shrink: true }} sx={{ mb: 1 }} />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setEditPayment(null)} sx={{ color: '#666' }}>Cancel</Button>
+          <Button variant="contained" onClick={handleEditSave} disabled={editSaving}
+            sx={{ bgcolor: '#1a5c38', '&:hover': { bgcolor: '#0f3320' } }}>
+            {editSaving ? 'Saving...' : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Delete Confirmation Dialog ── */}
+      <Dialog open={!!deletePayment} onClose={() => setDeletePayment(null)} maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: 700, color: '#c62828' }}>🗑️ Delete Payment</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete this payment?
+          </DialogContentText>
+          {deletePayment && (
+            <Box sx={{ mt: 2, p: 1.5, bgcolor: '#fff5f5', borderRadius: 1.5, border: '1px solid #ffcdd2' }}>
+              <Typography fontSize={13}><b>Sender:</b> {deletePayment.senderName}</Typography>
+              <Typography fontSize={13}><b>Receiver:</b> {deletePayment.transferTo}</Typography>
+              <Typography fontSize={13}><b>Amount:</b> ₹{Math.abs(deletePayment.amount || 0).toLocaleString()}</Typography>
+              <Typography fontSize={13}><b>Date:</b> {deletePayment.createdAt ? new Date(deletePayment.createdAt).toLocaleDateString('en-IN') : '-'}</Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setDeletePayment(null)} sx={{ color: '#666' }}>Cancel</Button>
+          <Button variant="contained" onClick={handleDeleteConfirm} disabled={deleteLoading}
+            sx={{ bgcolor: '#c62828', '&:hover': { bgcolor: '#8b0000' } }}>
+            {deleteLoading ? 'Deleting...' : 'Yes, Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
     </Box>
   );
 }

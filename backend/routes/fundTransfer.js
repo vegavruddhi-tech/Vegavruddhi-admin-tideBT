@@ -612,11 +612,7 @@ router.get('/usage-summary', async (req, res) => {
 
       // totalAvailable = carryForward + received (positive only)
       // For TL: also subtract what they sent to FSEs from received
-      // For TLs: effectiveReceived = received - sent to FSEs.
-      // If TL distributed fund to FSEs but received nothing this month,
-      // the distribution comes from carry forward — so it reduces available.
-      // Do NOT clamp to 0 here; the carry forward will cover it.
-      const effectiveReceived = isTL ? (received - sentToFSEs) : received;
+      const effectiveReceived = isTL ? Math.max(0, received - sentToFSEs) : received;
       const totalAvailable = carryFwd + effectiveReceived;
 
       // Fund Left = totalAvailable - deductions (returns) - BT/RP costs
@@ -671,10 +667,19 @@ router.post('/', async (req, res) => {
   try {
     const db = req.db;
     console.log('📝 Fund transfer POST received:', req.body);
-    const { transferToWhom, senderName, transferTo, amount, paymentDoneOn } = req.body;
+    const { transferToWhom, senderName, transferTo, amount, paymentDoneOn, paymentDate } = req.body;
 
     if (!transferToWhom || !senderName || !transferTo || !amount || !paymentDoneOn) {
       return res.status(400).json({ success: false, message: 'All fields are required' });
+    }
+
+    // Use paymentDate if provided (backdating), otherwise use current time
+    // paymentDate is YYYY-MM-DD format from frontend date picker
+    let createdAt = new Date();
+    if (paymentDate) {
+      // Set to noon IST of the selected date to avoid timezone issues
+      const parsed = new Date(paymentDate + 'T12:00:00+05:30');
+      if (!isNaN(parsed.getTime())) createdAt = parsed;
     }
 
     const payment = {
@@ -684,7 +689,7 @@ router.post('/', async (req, res) => {
       amount: parseFloat(amount),
       paymentDoneOn,
       source: 'admin-panel',
-      createdAt: new Date()
+      createdAt
     };
 
     const result = await db.collection('TideBT_Payments').insertOne(payment);
@@ -708,6 +713,64 @@ router.post('/cache/bust', async (req, res) => {
     await bustCache(db);
     res.json({ success: true, message: 'Summary cache cleared' });
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT /api/fund-transfer/:id — Edit a payment record
+router.put('/:id', async (req, res) => {
+  try {
+    const { ObjectId } = require('mongodb');
+    const db = req.db;
+    const { transferToWhom, senderName, transferTo, amount, paymentDoneOn, paymentDate } = req.body;
+
+    const updateFields = { updatedAt: new Date() };
+    if (transferToWhom !== undefined) updateFields.transferToWhom = transferToWhom;
+    if (senderName     !== undefined) updateFields.senderName     = senderName;
+    if (transferTo     !== undefined) updateFields.transferTo     = transferTo;
+    if (amount         !== undefined) updateFields.amount         = parseFloat(amount);
+    if (paymentDoneOn  !== undefined) updateFields.paymentDoneOn  = paymentDoneOn;
+    if (paymentDate) {
+      // Store as noon IST to avoid timezone shifting
+      const d = new Date(paymentDate + 'T06:30:00.000Z'); // 06:30 UTC = 12:00 IST
+      updateFields.createdAt = d;
+    }
+
+    const result = await db.collection('TideBT_Payments').updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: updateFields }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    await bustCache(db);
+    res.json({ success: true, message: 'Payment updated' });
+  } catch (error) {
+    console.error('Error updating payment:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/fund-transfer/:id — Delete a payment record
+router.delete('/:id', async (req, res) => {
+  try {
+    const { ObjectId } = require('mongodb');
+    const db = req.db;
+
+    const result = await db.collection('TideBT_Payments').deleteOne(
+      { _id: new ObjectId(req.params.id) }
+    );
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    await bustCache(db);
+    res.json({ success: true, message: 'Payment deleted' });
+  } catch (error) {
+    console.error('Error deleting payment:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -124,9 +124,17 @@ async function run() {
   const existing = await db.collection('TideBT_Payments').countDocuments();
   console.log(`\nExisting records in TideBT_Payments: ${existing}`);
 
-  await db.collection('TideBT_Payments').deleteMany({});
-  console.log('Cleared old data.');
+  // ── SAFE SYNC: never delete admin-panel or tl-panel entries ──────────────
+  // Sheet sync uses a fingerprint (senderName + transferTo + amount + date rounded to minute)
+  // to upsert — so re-syncing won't create duplicates.
+  // Only 'pt-sheet-sync' source records are managed by this script.
+  // Admin-panel / tl-panel records are untouched.
 
+  // Step 1: Remove only previous sheet-synced records (source = pt-sheet-sync)
+  const deleteResult = await db.collection('TideBT_Payments').deleteMany({ source: 'pt-sheet-sync' });
+  console.log(`Removed ${deleteResult.deletedCount} old sheet-sync records.`);
+
+  // Step 2: Insert fresh sheet records
   if (docs.length > 0) {
     await db.collection('TideBT_Payments').insertMany(docs);
     console.log(`✅ Inserted ${docs.length} records into TideBT_Payments.`);
@@ -135,6 +143,10 @@ async function run() {
     const fseCount = docs.length - tlCount;
     console.log(`   TL payments: ${tlCount}, FSE payments: ${fseCount}`);
   }
+
+  // Step 3: Report admin-panel / tl-panel records that were preserved
+  const preserved = await db.collection('TideBT_Payments').countDocuments({ source: { $ne: 'pt-sheet-sync' } });
+  console.log(`✅ Preserved ${preserved} admin/TL panel records (not touched by sync).`);
 
   await mongoose.connection.close();
   console.log('\nDone! ✅');
