@@ -158,7 +158,7 @@ function FSEGroup({ fse, forms, onViewForm }) {
 }
 
 // ── TL Card (collapsible, shows FSEs inside) ──────────────────
-function TLCard({ tl, onViewForm, dateFilter, fromDate, toDate, selectedYear, selectedMonth }) {
+function TLCard({ tl, onViewForm, dateFilter, fromDate, toDate, selectedYear, selectedMonth, teamBT = 0 }) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fses, setFses] = useState([]);
@@ -1010,13 +1010,24 @@ export default function TLOverview() {
   // Update drill data reactively when allMerchantsData loads
   useEffect(() => {
     if (!kpiDialog || allMerchantsData.length === 0) return;
+    // Apply search filter to drill data too
+    const matchedTLNames = search
+      ? new Set(tls.filter(t =>
+          (t.name||'').toLowerCase().includes(search.toLowerCase()) ||
+          (t.phone||'').includes(search) ||
+          (t.email||'').toLowerCase().includes(search.toLowerCase())
+        ).map(t => (t.name||'').toLowerCase().trim()))
+      : null;
+    const kpiData = matchedTLNames
+      ? allMerchantsData.filter(m => matchedTLNames.has((m.tlName||m.tl||'').toLowerCase().trim()))
+      : allMerchantsData;
     let drill = [];
-    if (kpiDialog === 'bt-done')      drill = allMerchantsData.filter(m => (m.stage3||0)>0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
-    if (kpiDialog === 'yesterday-bt') drill = allMerchantsData.filter(m => (m.yesterdaysStage3||0)>0).sort((a,b)=>(b.yesterdaysStage3||0)-(a.yesterdaysStage3||0));
-    if (kpiDialog === 'rp-active')    drill = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
-    if (kpiDialog === 'rp-pending')   drill = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+    if (kpiDialog === 'bt-done')      drill = kpiData.filter(m => (m.stage3||0)>0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+    if (kpiDialog === 'yesterday-bt') drill = kpiData.filter(m => (m.yesterdaysStage3||0)>0).sort((a,b)=>(b.yesterdaysStage3||0)-(a.yesterdaysStage3||0));
+    if (kpiDialog === 'rp-active')    drill = kpiData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
+    if (kpiDialog === 'rp-pending')   drill = kpiData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').sort((a,b)=>(b.stage3||0)-(a.stage3||0));
     setKpiDrillData(drill);
-  }, [allMerchantsData, kpiDialog]);
+  }, [allMerchantsData, kpiDialog, search, tls]);
 
   const handleViewForm = (form) => {
     setSelectedForm(form);
@@ -1073,13 +1084,25 @@ export default function TLOverview() {
         ))}
       </Box>
 
-      {/* BT Performance KPI Cards — all TLs combined */}
+      {/* BT Performance KPI Cards — filtered by search if active */}
       {(() => {
-        const totalBT      = allMerchantsData.reduce((s,m) => s+(m.stage3||0), 0);
-        const yesterdaysBT = allMerchantsData.reduce((s,m) => s+(m.yesterdaysStage3||0), 0);
-        const rpActive     = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active').length;
-        const rpPending    = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').length;
-        const btMerchants  = allMerchantsData.filter(m => (m.stage3||0)>0).length;
+        // When search is active, only show KPIs for matched TLs
+        const matchedTLNames = search
+          ? new Set(tls.filter(t =>
+              (t.name||'').toLowerCase().includes(search.toLowerCase()) ||
+              (t.phone||'').includes(search) ||
+              (t.email||'').toLowerCase().includes(search.toLowerCase())
+            ).map(t => (t.name||'').toLowerCase().trim()))
+          : null;
+        const kpiData = matchedTLNames
+          ? allMerchantsData.filter(m => matchedTLNames.has((m.tlName||m.tl||'').toLowerCase().trim()))
+          : allMerchantsData;
+
+        const totalBT      = kpiData.reduce((s,m) => s+(m.stage3||0), 0);
+        const yesterdaysBT = kpiData.reduce((s,m) => s+(m.yesterdaysStage3||0), 0);
+        const rpActive     = kpiData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active').length;
+        const rpPending    = kpiData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').length;
+        const btMerchants  = kpiData.filter(m => (m.stage3||0)>0).length;
         const kpis = [
           { key:'bt-done',      label:'Total BT Completed', value: merchantsLoading?'…':`₹${totalBT.toLocaleString()}`,      sub:`${btMerchants} merchants`,   icon:'💰', color:'#e65100', bg:'#fff3e0', border:'#e6510030' },
           { key:'yesterday-bt', label:"Yesterday's BT",     value: merchantsLoading?'…':`₹${yesterdaysBT.toLocaleString()}`, sub:'BT done yesterday',          icon:'📈', color:'#0369a1', bg:'#e0f2fe', border:'#0369a130' },
@@ -1091,10 +1114,10 @@ export default function TLOverview() {
             {kpis.map(kpi => (
               <Card key={kpi.key} onClick={() => {
                 let drill = [];
-                if (kpi.key === 'bt-done')      drill = allMerchantsData.filter(m => (m.stage3||0)>0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
-                if (kpi.key === 'yesterday-bt') drill = allMerchantsData.filter(m => (m.yesterdaysStage3||0)>0).sort((a,b)=>(b.yesterdaysStage3||0)-(a.yesterdaysStage3||0));
-                if (kpi.key === 'rp-active')    drill = allMerchantsData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
-                if (kpi.key === 'rp-pending')   drill = allMerchantsData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+                if (kpi.key === 'bt-done')      drill = kpiData.filter(m => (m.stage3||0)>0).sort((a,b)=>(b.stage3||0)-(a.stage3||0));
+                if (kpi.key === 'yesterday-bt') drill = kpiData.filter(m => (m.yesterdaysStage3||0)>0).sort((a,b)=>(b.yesterdaysStage3||0)-(a.yesterdaysStage3||0));
+                if (kpi.key === 'rp-active')    drill = kpiData.filter(m => (m.rewardPassPro||'').toLowerCase()==='active');
+                if (kpi.key === 'rp-pending')   drill = kpiData.filter(m => (m.stage3||0)>=10000 && (m.rewardPassPro||'').toLowerCase()!=='active').sort((a,b)=>(b.stage3||0)-(a.stage3||0));
                 setKpiDrillData(drill);
                 setKpiDialog(kpi.key);
                 // If data not loaded yet, trigger load
@@ -1144,11 +1167,19 @@ export default function TLOverview() {
       ) : (
         filteredTLs
           .sort((a, b) => (b.fseCount || 0) - (a.fseCount || 0))
-          .map(tl => (
-            <TLCard key={tl.name} tl={tl} onViewForm={handleViewForm}
-              dateFilter={dateFilter} fromDate={fromDate} toDate={toDate}
-              selectedYear={selectedYear} selectedMonth={selectedMonth} />
-          ))
+          .map(tl => {
+            // Compute team BT from allMerchantsData for this TL
+            const tlNameLower = (tl.name||'').toLowerCase().trim();
+            const teamBT = allMerchantsData
+              .filter(m => (m.tlName||m.tl||'').toLowerCase().trim() === tlNameLower)
+              .reduce((s, m) => s + (m.stage3||0), 0);
+            return (
+              <TLCard key={tl.name} tl={tl} onViewForm={handleViewForm}
+                dateFilter={dateFilter} fromDate={fromDate} toDate={toDate}
+                selectedYear={selectedYear} selectedMonth={selectedMonth}
+                teamBT={teamBT} />
+            );
+          })
       )}
 
       {/* KPI Drill-down Dialog — TL → FSE → Merchant hierarchy */}
