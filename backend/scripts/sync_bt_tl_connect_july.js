@@ -173,6 +173,42 @@ async function run() {
   console.log('\nDone! ✅');
   console.log('\n⚠️  Remember to bust the API cache after this sync:');
   console.log('   POST /api/fse/cache/bust   or   POST /api/tl/cache/bust');
+
+  // ── Auto-send daily BT report email after sync ───────────────────────────
+  // Calls the deployed backend API endpoint so it runs with full DB access
+  console.log('\n📧 Sending daily BT report email...');
+  try {
+    const https   = require('https');
+    const http    = require('http');
+    const apiBase = process.env.BACKEND_API_URL || 'http://localhost:5001';
+    const url     = `${apiBase}/api/report/send-daily-bt-report`;
+    const mod     = url.startsWith('https') ? https : http;
+
+    await new Promise((resolve, reject) => {
+      const req = mod.request(url, { method: 'POST' }, res => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          try {
+            const result = JSON.parse(data);
+            if (result.success) {
+              console.log(`✅ Report email sent! Recipients: ${(result.recipients || []).join(', ')}`);
+              console.log(`   MTD BT: ₹${(result.mtdBT || 0).toLocaleString()} | FTD BT: ₹${(result.ftdBT || 0).toLocaleString()}`);
+            } else {
+              console.warn(`⚠️  Report email failed: ${result.reason || result.error}`);
+            }
+          } catch { console.warn('⚠️  Could not parse report response'); }
+          resolve();
+        });
+      });
+      req.on('error', e => { console.warn('⚠️  Report email request failed (non-fatal):', e.message); resolve(); });
+      req.setTimeout(30000, () => { req.destroy(); resolve(); });
+      req.end();
+    });
+  } catch (reportErr) {
+    console.warn('⚠️  Report email failed (non-fatal):', reportErr.message);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 }
 
 run().catch(e => { console.error('❌ Error:', e.message); process.exit(1); });
