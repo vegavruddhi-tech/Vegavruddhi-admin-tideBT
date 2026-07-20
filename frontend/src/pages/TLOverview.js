@@ -158,7 +158,7 @@ function FSEGroup({ fse, forms, onViewForm }) {
 }
 
 // ── TL Card (collapsible, shows FSEs inside) ──────────────────
-function TLCard({ tl, onViewForm, dateFilter, fromDate, toDate, selectedYear, selectedMonth, teamBT = 0 }) {
+function TLCard({ tl, onViewForm, dateFilter, fromDate, toDate, selectedYear, selectedMonth, teamBT = 0, teamRP = 0, teamYesterdayBT = 0 }) {
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fses, setFses] = useState([]);
@@ -264,6 +264,18 @@ function TLCard({ tl, onViewForm, dateFilter, fromDate, toDate, selectedYear, se
           )}
           <Chip label={`${filteredForms.length || '–'} Visit Forms`} size="small"
             sx={{ bgcolor: '#e6f4ea', color: '#2e7d32', fontWeight: 700, fontSize: 11, border: '1px solid #2e7d3230' }} />
+          {teamBT > 0 && (
+            <Chip label={`₹${teamBT.toLocaleString()} BT`} size="small"
+              sx={{ bgcolor: '#fff3e0', color: '#e65100', fontWeight: 700, fontSize: 11, border: '1px solid #e6510030' }} />
+          )}
+          {teamRP > 0 && (
+            <Chip label={`${teamRP} RP`} size="small"
+              sx={{ bgcolor: '#ede9fe', color: '#7c3aed', fontWeight: 700, fontSize: 11, border: '1px solid #7c3aed30' }} />
+          )}
+          {teamYesterdayBT > 0 && (
+            <Chip label={`Yest ₹${teamYesterdayBT.toLocaleString()}`} size="small"
+              sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700, fontSize: 11, border: '1px solid #0369a130' }} />
+          )}
           {expanded ? <ExpandLessIcon sx={{ color: 'text.secondary' }} /> : <ExpandMoreIcon sx={{ color: 'text.secondary' }} />}
         </Box>
       </Box>
@@ -1170,14 +1182,16 @@ export default function TLOverview() {
           .map(tl => {
             // Compute team BT from allMerchantsData for this TL
             const tlNameLower = (tl.name||'').toLowerCase().trim();
-            const teamBT = allMerchantsData
-              .filter(m => (m.tlName||m.tl||'').toLowerCase().trim() === tlNameLower)
-              .reduce((s, m) => s + (m.stage3||0), 0);
+            const tlMerchants = allMerchantsData
+              .filter(m => (m.tlName||m.tl||'').toLowerCase().trim() === tlNameLower);
+            const teamBT = tlMerchants.reduce((s, m) => s + (m.stage3||0), 0);
+            const teamRP = tlMerchants.filter(m => (m.rewardPassPro||'').toLowerCase() === 'active').length;
+            const teamYesterdayBT = tlMerchants.reduce((s, m) => s + (m.yesterdaysStage3||0), 0);
             return (
               <TLCard key={tl.name} tl={tl} onViewForm={handleViewForm}
                 dateFilter={dateFilter} fromDate={fromDate} toDate={toDate}
                 selectedYear={selectedYear} selectedMonth={selectedMonth}
-                teamBT={teamBT} />
+                teamBT={teamBT} teamRP={teamRP} teamYesterdayBT={teamYesterdayBT} />
             );
           })
       )}

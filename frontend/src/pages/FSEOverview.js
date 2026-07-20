@@ -758,6 +758,7 @@ export default function FSEOverview() {
                         { label: `${m.passLive} Live`,   bg: '#d8f3dc', color: '#1a4731' },
                         { label: `${m.pending} Pending`, bg: '#fef3c7', color: '#92400e' },
                         { label: `₹${(m.totalBT||0).toLocaleString()} BT Amt`, bg: '#fff3e0', color: '#e65100' },
+                        ...(m.yesterdayBT > 0 ? [{ label: `Yest ₹${(m.yesterdayBT||0).toLocaleString()}`, bg: '#e0f2fe', color: '#0369a1' }] : []),
                       ].map(c => (
                         <Chip key={c.label} label={c.label} size="small"
                           sx={{ bgcolor: c.bg, color: c.color, fontWeight: 700, fontSize: 10, border: `1px solid ${c.color}20` }} />

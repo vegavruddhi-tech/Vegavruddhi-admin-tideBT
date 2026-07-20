@@ -117,11 +117,11 @@ router.get('/merchants/all', async (req, res) => {
     const allNums = [...new Set(masterDocs.map(m => (m.merchantNumber || '').trim()).filter(Boolean))];
 
     // Step 4: BT metrics from BT_TL_CONNECT — aggregate by merchantNumber
-    const btMetrics = {}; // fseName → {totalBT, btDone, rpDone, passLive}
+    const btMetrics = {}; // fseName → {totalBT, btDone, rpDone, passLive, yesterdayBT}
     if (btCollectionName && allNums.length > 0) {
       const btDocs = await db.collection(btCollectionName).find(
         { merchantNumber: { $in: allNums } },
-        { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, passLive: 1, priorityPassPro: 1, _id: 0 } }
+        { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, passLive: 1, priorityPassPro: 1, yesterdaysStage3: 1, yesterday_s_stage_3: 1, _id: 0 } }
       ).toArray();
 
       // Build num→fse map
@@ -133,11 +133,13 @@ router.get('/merchants/all', async (req, res) => {
         const rawFse = numToFse[num];
         const fseName = fseNames.find(n => new RegExp(`^\\s*${escape(n)}\\s*\\d*\\s*$`, 'i').test(rawFse || ''));
         if (!fseName) return;
-        if (!btMetrics[fseName]) btMetrics[fseName] = { totalBT: 0, btDone: 0, rpDone: 0, passLive: 0 };
-        const s3 = parseFloat(String(r.stage3 || '0').replace(/,/g,'')) || 0;
-        const rp = (r.rewardPassPro || r.priorityPassPro || '').toLowerCase() === 'active';
-        const pl = (r.passLive || '').toLowerCase() === 'live';
-        btMetrics[fseName].totalBT += s3;
+        if (!btMetrics[fseName]) btMetrics[fseName] = { totalBT: 0, btDone: 0, rpDone: 0, passLive: 0, yesterdayBT: 0 };
+        const s3  = parseFloat(String(r.stage3 || '0').replace(/,/g,'')) || 0;
+        const y3  = parseFloat(String(r.yesterdaysStage3 || r.yesterday_s_stage_3 || r["Yesterday's_Stage-3"] || '0').replace(/,/g,'')) || 0;
+        const rp  = (r.rewardPassPro || r.priorityPassPro || '').toLowerCase() === 'active';
+        const pl  = (r.passLive || '').toLowerCase() === 'live';
+        btMetrics[fseName].totalBT     += s3;
+        btMetrics[fseName].yesterdayBT += y3;
         if (s3 > 0) btMetrics[fseName].btDone++;
         if (rp) btMetrics[fseName].rpDone++;
         if (pl) btMetrics[fseName].passLive++;
@@ -149,19 +151,20 @@ router.get('/merchants/all', async (req, res) => {
     // Step 5: Build summary per FSE (no merchant details)
     const data = fseNames.map(fseName => {
       const total = (fseMerchantNums[fseName] || []).length;
-      const bm = btMetrics[fseName] || { totalBT: 0, btDone: 0, rpDone: 0, passLive: 0 };
+      const bm = btMetrics[fseName] || { totalBT: 0, btDone: 0, rpDone: 0, passLive: 0, yesterdayBT: 0 };
       return {
         fseName,
         tlName: tlMap[fseName] || '–',
         metrics: {
           total,
-          btDone:   bm.btDone,
-          rpDone:   bm.rpDone,
-          passLive: bm.passLive,
-          pending:  total - bm.passLive,
-          totalBT:  Math.round(bm.totalBT),
-          verified: bm.btDone,
-          onboarded: bm.passLive,
+          btDone:      bm.btDone,
+          rpDone:      bm.rpDone,
+          passLive:    bm.passLive,
+          pending:     total - bm.passLive,
+          totalBT:     Math.round(bm.totalBT),
+          yesterdayBT: Math.round(bm.yesterdayBT || 0),
+          verified:    bm.btDone,
+          onboarded:   bm.passLive,
         }
       };
     }).filter(d => d.metrics.total > 0);
