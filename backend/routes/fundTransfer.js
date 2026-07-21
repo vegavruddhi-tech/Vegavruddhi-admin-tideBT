@@ -400,8 +400,8 @@ router.get('/usage-summary', async (req, res) => {
     const rpCountMap    = {}; // fseName → count of merchants with rewardPassPro=Active
     const withdrawMap   = {}; // fseName → total withdraw amount from TideBT Form Responses
 
-    // Build numToFSE from bt_master + TideBT_Merchants + TideBT Form Responses
-    // All 3 sources combined = same set as FSE portal uses
+    // Build numToFSE from bt_master + TideBT Form Responses
+    // Same sources as TL and FSE portals — no TideBT_Merchants (legacy)
     const masterDocsAll = await db.collection('bt_master').find(
       {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
     ).toArray();
@@ -410,14 +410,6 @@ router.get('/usage-summary', async (req, res) => {
       const num = (m.merchantNumber || '').trim();
       const fse = (m.fseName || '').trim();
       if (num && fse) numToFSE[num] = fse;
-    });
-    const merchantDocsAll = await db.collection('TideBT_Merchants').find(
-      {}, { projection: { merchantNumber: 1, employeeName: 1, _id: 0 } }
-    ).toArray();
-    merchantDocsAll.forEach(m => {
-      const num = (m.merchantNumber || '').trim();
-      const fse = (m.employeeName  || '').trim();
-      if (num && fse && !numToFSE[num]) numToFSE[num] = fse;
     });
     // Also include merchants from TideBT Form Responses (same as FSE portal)
     const formDocsAll = await db.collection('TideBT Form Responses').find(
