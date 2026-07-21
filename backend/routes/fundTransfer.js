@@ -478,18 +478,27 @@ router.get('/usage-summary', async (req, res) => {
         // (admins often enter wrong type when recording a return)
         deductionMap[n] = (deductionMap[n] || 0) + Math.abs(amount);
       } else {
-        // Positive = normal payment — match role to whom type
-        if ((role === "TL's & Managers" && whom === "TL's & Managers") ||
-            (role === "FSE Ground Team"  && whom === "FSE Ground Team")) {
+        // Positive = normal payment
+        // For TLs: only count TL's & Managers type (strict — avoids double counting)
+        // For FSEs/FSCs: count ALL positive payments regardless of transferToWhom
+        //   because TLs often enter wrong type (TL's & Managers) when sending to FSC/FSE
+        //   This ensures FSE fund received is always tracked correctly
+        if (role === "TL's & Managers" && whom === "TL's & Managers") {
+          receivedMap[n] = (receivedMap[n] || 0) + amount;
+        } else if (role === "FSE Ground Team") {
+          // Accept any transferToWhom for FSE — name match is sufficient
           receivedMap[n] = (receivedMap[n] || 0) + amount;
         }
       }
     });
 
-    // sentMap: payments sent OUT by each TL — month-scoped
-    // Count ALL TL outgoing (to FSEs + to sub-TLs), not just "FSE Ground Team" type
-    // This fixes TLs like Ravi Kumar who distribute via "TL's & Managers" type entries too
-    const sentMap = {};
+    // sentMap: ONLY positive payments sent OUT by each TL — month-scoped
+    // Negative (minus fund / recovery) entries are EXCLUDED from sentMap.
+    // They go into recoveryMap (TL credited back) instead.
+    // This keeps "Sent to FSC" unchanged when a minus fund is submitted.
+    const sentMap    = {};
+    const recoveryMap = {}; // TL gets credited when they recover fund from FSC
+
     filteredPayments.forEach(p => {
       const sender   = (p.senderName  || '').trim();
       const receiver = (p.transferTo  || '').trim();
@@ -501,8 +510,16 @@ router.get('/usage-summary', async (req, res) => {
       if (receiver.toLowerCase() === sender.toLowerCase()) return;
       // Only TL senders (authoritative from nameRoleMap)
       if (nameRoleMap[sender] !== "TL's & Managers") return;
-      // Count all outgoing (positive = distributed, negative = recovered back)
-      sentMap[sender] = (sentMap[sender] || 0) + amount;
+
+      if (amount > 0) {
+        // Normal outgoing — TL sent fund to FSC
+        sentMap[sender] = (sentMap[sender] || 0) + amount;
+      } else if (amount < 0) {
+        // Minus fund / recovery — TL took back fund from FSC
+        // Credit the recovered amount back to the TL (sender)
+        recoveryMap[sender] = (recoveryMap[sender] || 0) + Math.abs(amount);
+        // FSC deduction is already handled in deductionMap above (amount < 0 block)
+      }
     });
 
     // Also build a carryForward-aware net balance per TL using ALL payments (not just filtered)
@@ -604,18 +621,20 @@ router.get('/usage-summary', async (req, res) => {
       const withdrawFee    = Math.round(withdrawAmount * 0.03 * 100) / 100;
 
       // received = positive payments only
-      // deduction = absolute value of negative payments (fund returns/recoveries)
+      // deduction = absolute value of negative payments (fund returns/recoveries) — FSC side
+      // recovery = minus fund recovered BY this TL FROM FSC — TL side credit
       const received    = receivedMap[name]  || 0;
       const deduction   = deductionMap[name] || 0;
+      const recovery    = isTL ? (recoveryMap[name] || 0) : 0;
       const sentToFSEs  = isTL ? (sentMap[name] || 0) : 0;
       const carryFwd    = carryMap[nameLower] || 0;
 
-      // totalAvailable = carryForward + received (positive only)
-      // For TL: also subtract what they sent to FSEs from received
-      const effectiveReceived = isTL ? Math.max(0, received - sentToFSEs) : received;
+      // totalAvailable = carryForward + received + recovered (minus fund credited back)
+      // For TL: subtract what they sent to FSEs (only positive sent, not recoveries)
+      const effectiveReceived = isTL ? Math.max(0, received + recovery - sentToFSEs) : received;
       const totalAvailable = carryFwd + effectiveReceived;
 
-      // Fund Left = totalAvailable - deductions (returns) - BT/RP costs
+      // Fund Left = totalAvailable - deductions (FSC side) - BT/RP costs
       const totalUsed = usedRP + btFee + withdrawFee;
       const fundLeft  = totalAvailable - deduction - totalUsed;
 
@@ -624,6 +643,7 @@ router.get('/usage-summary', async (req, res) => {
         type: nameRoleMap[name],
         received,
         deduction,
+        recovery,
         carryForward: carryFwd,
         totalAvailable,
         sentToFSEs,
