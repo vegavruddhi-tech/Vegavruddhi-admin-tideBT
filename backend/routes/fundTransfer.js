@@ -478,15 +478,12 @@ router.get('/usage-summary', async (req, res) => {
         // (admins often enter wrong type when recording a return)
         deductionMap[n] = (deductionMap[n] || 0) + Math.abs(amount);
       } else {
-        // Positive = normal payment
-        // For TLs: only count TL's & Managers type (strict — avoids double counting)
-        // For FSEs/FSCs: count ALL positive payments regardless of transferToWhom
-        //   because TLs often enter wrong type (TL's & Managers) when sending to FSC/FSE
-        //   This ensures FSE fund received is always tracked correctly
-        if (role === "TL's & Managers" && whom === "TL's & Managers") {
-          receivedMap[n] = (receivedMap[n] || 0) + amount;
-        } else if (role === "FSE Ground Team") {
-          // Accept any transferToWhom for FSE — name match is sufficient
+        // Positive = normal payment — strictly match role to whom type
+        // FSE must only count "FSE Ground Team" type payments
+        // TL must only count "TL's & Managers" type payments
+        // This prevents double-counting when a name appears in both payment types
+        if ((role === "TL's & Managers" && whom === "TL's & Managers") ||
+            (role === "FSE Ground Team"  && whom === "FSE Ground Team")) {
           receivedMap[n] = (receivedMap[n] || 0) + amount;
         }
       }
