@@ -174,6 +174,22 @@ async function run() {
   console.log('\n⚠️  Remember to bust the API cache after this sync:');
   console.log('   POST /api/fse/cache/bust   or   POST /api/tl/cache/bust');
 
+  // ── Auto-clear MongoDB cache after sync ───────────────────────────────────
+  // This ensures TL and Admin portals show fresh BT data immediately after sync
+  // without needing a manual cache clear
+  console.log('\n🗑️  Auto-clearing MongoDB cache...');
+  try {
+    await mongoose.connect(mongoUri, { dbName: 'CompanyDB' });
+    const cacheDb = mongoose.connection.db;
+    const r1 = await cacheDb.collection('TideBT_SummaryCache').deleteMany({});
+    const r2 = await cacheDb.collection('ApiCache').deleteMany({});
+    console.log(`✅ Cache cleared — TideBT_SummaryCache: ${r1.deletedCount} entries, ApiCache: ${r2.deletedCount} entries`);
+    await mongoose.connection.close();
+  } catch (cacheErr) {
+    console.warn('⚠️  Cache clear failed (non-fatal):', cacheErr.message);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // ── Auto-send daily BT report email after sync ───────────────────────────
   // Calls the deployed backend API endpoint so it runs with full DB access
   console.log('\n📧 Sending daily BT report email...');
