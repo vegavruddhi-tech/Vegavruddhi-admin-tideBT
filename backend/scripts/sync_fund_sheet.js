@@ -130,23 +130,78 @@ async function run() {
   // Only 'pt-sheet-sync' source records are managed by this script.
   // Admin-panel / tl-panel records are untouched.
 
-  // Step 1: Remove only previous sheet-synced records (source = pt-sheet-sync)
+  // Step 1: Remove previous sheet-synced records
   const deleteResult = await db.collection('TideBT_Payments').deleteMany({ source: 'pt-sheet-sync' });
   console.log(`Removed ${deleteResult.deletedCount} old sheet-sync records.`);
 
-  // Step 2: Insert fresh sheet records
-  if (docs.length > 0) {
-    await db.collection('TideBT_Payments').insertMany(docs);
-    console.log(`✅ Inserted ${docs.length} records into TideBT_Payments.`);
+  // Step 2: Fetch existing form payments (submitted via TL / Admin dashboard)
+  const existingFormPayments = await db.collection('TideBT_Payments').find({
+    source: { $ne: 'pt-sheet-sync' }
+  }).toArray();
 
-    const tlCount  = docs.filter(d => d.transferToWhom === "TL's & Managers").length;
-    const fseCount = docs.length - tlCount;
+  const formPaymentKeys = new Set();
+  existingFormPayments.forEach(p => {
+    const fse = (p.transferTo || p.fseName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const amt = Math.abs(parseFloat(p.amount) || 0);
+    let dayNum = '';
+    if (p.paymentDoneOn) {
+      const match = String(p.paymentDoneOn).match(/\d+/);
+      if (match) dayNum = match[0];
+    }
+    if (!dayNum && p.createdAt) {
+      const d = new Date(p.createdAt);
+      if (!isNaN(d.getTime())) dayNum = String(d.getDate());
+    }
+    if (fse && amt) {
+      formPaymentKeys.add(`${fse}_${amt}_day${dayNum}`);
+    }
+  });
+
+  // Filter out sheet rows that are ALREADY in formPaymentKeys (submitted via dashboard)
+  const filteredDocs = [];
+  let skippedDuplicates = 0;
+
+  docs.forEach(d => {
+    const fse = (d.transferTo || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const amt = Math.abs(parseFloat(d.amount) || 0);
+    let dayNum = '';
+    if (d.paymentDoneOn) {
+      const match = String(d.paymentDoneOn).match(/\d+/);
+      if (match) dayNum = match[0];
+    }
+    if (!dayNum && d.createdAt) {
+      const dateObj = new Date(d.createdAt);
+      if (!isNaN(dateObj.getTime())) dayNum = String(dateObj.getDate());
+    }
+
+    const key = `${fse}_${amt}_day${dayNum}`;
+    if (formPaymentKeys.has(key)) {
+      skippedDuplicates++;
+    } else {
+      filteredDocs.push(d);
+    }
+  });
+
+  if (skippedDuplicates > 0) {
+    console.log(`⏩ SKIPPED ${skippedDuplicates} duplicate sheet rows that were ALREADY submitted via Dashboard Forms.`);
+  }
+
+  // Step 3: Insert only unique sheet records
+  if (filteredDocs.length > 0) {
+    await db.collection('TideBT_Payments').insertMany(filteredDocs);
+    console.log(`✅ Inserted ${filteredDocs.length} unique records into TideBT_Payments.`);
+
+    const tlCount  = filteredDocs.filter(d => d.transferToWhom === "TL's & Managers").length;
+    const fseCount = filteredDocs.length - tlCount;
     console.log(`   TL payments: ${tlCount}, FSE payments: ${fseCount}`);
   }
 
-  // Step 3: Report admin-panel / tl-panel records that were preserved
+  // Step 4: Preserved count & clear summary cache
   const preserved = await db.collection('TideBT_Payments').countDocuments({ source: { $ne: 'pt-sheet-sync' } });
-  console.log(`✅ Preserved ${preserved} admin/TL panel records (not touched by sync).`);
+  console.log(`✅ Preserved ${preserved} dashboard form records.`);
+
+  const cacheRes = await db.collection('TideBT_SummaryCache').deleteMany({});
+  console.log(`🧹 Cleared ${cacheRes.deletedCount} cache entries from TideBT_SummaryCache.`);
 
   await mongoose.connection.close();
   console.log('\nDone! ✅');
