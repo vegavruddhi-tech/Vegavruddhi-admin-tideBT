@@ -191,36 +191,21 @@ async function run() {
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Auto-send daily BT report email after sync ───────────────────────────
-  // Calls the deployed backend API endpoint so it runs with full DB access
+  // Direct call — no HTTP timeout issues
   console.log('\n📧 Sending daily BT report email...');
   try {
-    const https   = require('https');
-    const http    = require('http');
-    const apiBase = process.env.BACKEND_API_URL || 'http://localhost:5001';
-    const url     = `${apiBase}/api/report/send-daily-bt-report`;
-    const mod     = url.startsWith('https') ? https : http;
-
-    await new Promise((resolve, reject) => {
-      const req = mod.request(url, { method: 'POST' }, res => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          try {
-            const result = JSON.parse(data);
-            if (result.success) {
-              console.log(`✅ Report email sent! Recipients: ${(result.recipients || []).join(', ')}`);
-              console.log(`   MTD BT: ₹${(result.mtdBT || 0).toLocaleString()} | FTD BT: ₹${(result.ftdBT || 0).toLocaleString()}`);
-            } else {
-              console.warn(`⚠️  Report email failed: ${result.reason || result.error}`);
-            }
-          } catch { console.warn('⚠️  Could not parse report response'); }
-          resolve();
-        });
-      });
-      req.on('error', e => { console.warn('⚠️  Report email request failed (non-fatal):', e.message); resolve(); });
-      req.setTimeout(30000, () => { req.destroy(); resolve(); });
-      req.end();
-    });
+    const { sendTideBTDailyReport } = require('../utils/tideBTDailyReport');
+    await mongoose.connect(mongoUri, { dbName: 'CompanyDB' });
+    const reportDb = mongoose.connection.db;
+    const result = await sendTideBTDailyReport(reportDb);
+    if (result.success) {
+      console.log(`✅ Report email sent! Recipients: ${(result.recipients || []).join(', ')}`);
+      console.log(`   FTD BT: ₹${(result.ftdBT || 0).toLocaleString()} | FTD RP: ${result.ftdRP || 0}`);
+      console.log(`   MTD BT: ₹${(result.mtdBT || 0).toLocaleString()} | MTD RP: ${result.mtdRP || 0}`);
+    } else {
+      console.warn(`⚠️  Report email failed: ${result.reason || result.error}`);
+    }
+    await mongoose.connection.close();
   } catch (reportErr) {
     console.warn('⚠️  Report email failed (non-fatal):', reportErr.message);
   }

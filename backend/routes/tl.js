@@ -229,7 +229,7 @@ router.get('/:tlName/team-merchants', async (req, res) => {
     const { selectedMonth, selectedYear } = req.query;
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    const ck = cacheKey('TL_TEAM_MERCHANTS', tlName, selectedMonth, selectedYear);
+    const ck = cacheKey('TL_TEAM_MERCHANTS_V2', tlName, selectedMonth, selectedYear);
     const cached = await cacheGet(db, ck);
     if (cached) return res.json(cached);
 
@@ -239,13 +239,13 @@ router.get('/:tlName/team-merchants', async (req, res) => {
     let accessRecs = await db.collection('TideBT_Access').find({
       tlName: { $regex: new RegExp(`^\\s*${escape(tlName)}\\s*$`, 'i') },
       hasTideBTAccess: true
-    }, { projection: { fseName:1, _id:0 } }).toArray();
+    }, { projection: { fseName:1, fseEmail:1, _id:0 } }).toArray();
     if (accessRecs.length === 0) {
       const fw = tlName.split(' ')[0];
       accessRecs = await db.collection('TideBT_Access').find({
         tlName: { $regex: new RegExp(`^\\s*${escape(fw)}\\s*$`, 'i') },
         hasTideBTAccess: true
-      }, { projection: { fseName:1, _id:0 } }).toArray();
+      }, { projection: { fseName:1, fseEmail:1, _id:0 } }).toArray();
     }
     const fseNames = [...new Set(accessRecs.map(r => r.fseName).filter(Boolean))];
 
@@ -256,7 +256,12 @@ router.get('/:tlName/team-merchants', async (req, res) => {
     }
 
     const masterDocs = await db.collection('bt_master').find(
-      { $or: fseNames.map(n => ({ fseName: { $regex: new RegExp(`^\\s*${escape(n)}\\s*\\d*\\s*$`, 'i') } })) },
+      {
+        $or: accessRecs.map(r => ({
+          fseName: { $regex: new RegExp(`^\\s*${escape(r.fseName || '')}\\s*\\d*\\s*$`, 'i') },
+          tl:      { $regex: new RegExp(`^\\s*${escape(tlName)}\\s*\\d*\\s*$`, 'i') }
+        }))
+      },
       { projection: { merchantNumber:1, merchantName:1, fseName:1, tl:1, _id:0 } }
     ).toArray();
 

@@ -106,18 +106,21 @@ async function sendTideBTDailyReport(db) {
 
     // ── Aggregate in one pass ──────────────────────────────────────────────
     const tlStats = {};
-    allTLNames.forEach(tl => { tlStats[tl] = { ftdBT: 0, mtdBT: 0, rp: 0 }; });
-    const grand = { ftdBT: 0, mtdBT: 0, rp: 0 };
+    allTLNames.forEach(tl => { tlStats[tl] = { ftdBT: 0, mtdBT: 0, ftdRP: 0, mtdRP: 0 }; });
+    const grand = { ftdBT: 0, mtdBT: 0, ftdRP: 0, mtdRP: 0 };
 
     btDocsAll.forEach(r => {
       const num   = (r.merchantNumber || '').trim();
       const mtdBT = parseNum(r.stage3 || r.Stage_3 || r['Stage-3']);
       const ftdBT = parseNum(r.todaysStage3 || r.todays_stage_3 || r["Today's_Stage-3"] || 0);
       const rp    = (r.rewardPassPro || r.priorityPassPro || '').toLowerCase() === 'active';
+      // FTD RP = merchants with RP active AND had BT today
+      const ftdRp = rp && ftdBT > 0;
 
       grand.mtdBT += mtdBT;
       grand.ftdBT += ftdBT;
-      if (rp) grand.rp++;
+      if (rp)    grand.mtdRP++;
+      if (ftdRp) grand.ftdRP++;
 
       if (!allNums.includes(num)) return;
       const rawFse = numToFse[num];
@@ -130,7 +133,8 @@ async function sendTideBTDailyReport(db) {
 
       tlStats[tlName].mtdBT += mtdBT;
       tlStats[tlName].ftdBT += ftdBT;
-      if (rp) tlStats[tlName].rp++;
+      if (rp)    tlStats[tlName].mtdRP++;
+      if (ftdRp) tlStats[tlName].ftdRP++;
     });
 
     const activeTLs = allTLNames
@@ -151,9 +155,9 @@ async function sendTideBTDailyReport(db) {
         <tr style="background:${bg};border-bottom:1px solid #e8f3ed;">
           <td style="padding:12px 14px;font-weight:700;font-size:13px;color:#1a4731;border-right:1px solid #e0ece0;">${tl}</td>
           <td style="padding:12px 14px;text-align:center;font-size:13px;border-right:1px solid #e0ece0;">${fmtBT(s.ftdBT)}</td>
-          <td style="padding:12px 14px;text-align:center;font-size:13px;border-right:2px solid #c8e6c9;">${fmtN(s.rp)}</td>
+          <td style="padding:12px 14px;text-align:center;font-size:13px;border-right:2px solid #c8e6c9;">${fmtN(s.ftdRP)}</td>
           <td style="padding:12px 14px;text-align:center;font-size:13px;border-right:1px solid #e0ece0;">${fmtBT(s.mtdBT)}</td>
-          <td style="padding:12px 14px;text-align:center;font-size:13px;">${fmtN(s.rp)}</td>
+          <td style="padding:12px 14px;text-align:center;font-size:13px;">${fmtN(s.mtdRP)}</td>
         </tr>`;
     }).join('');
 
@@ -161,9 +165,9 @@ async function sendTideBTDailyReport(db) {
       <tr style="background:#e6f4ea;font-weight:800;border-top:2px solid #2e7d32;">
         <td style="padding:13px 14px;font-size:14px;color:#1b5e20;border-right:1px solid #c8e6c9;">TOTAL (${activeTLs.length} TLs)</td>
         <td style="padding:13px 14px;text-align:center;font-size:14px;color:#e65100;border-right:1px solid #c8e6c9;">${plain(grand.ftdBT)}</td>
-        <td style="padding:13px 14px;text-align:center;font-size:14px;color:#7c3aed;border-right:2px solid #a5d6a7;">${grand.rp}</td>
+        <td style="padding:13px 14px;text-align:center;font-size:14px;color:#7c3aed;border-right:2px solid #a5d6a7;">${grand.ftdRP}</td>
         <td style="padding:13px 14px;text-align:center;font-size:14px;color:#b45309;border-right:1px solid #c8e6c9;">${plain(grand.mtdBT)}</td>
-        <td style="padding:13px 14px;text-align:center;font-size:14px;color:#7c3aed;">${grand.rp}</td>
+        <td style="padding:13px 14px;text-align:center;font-size:14px;color:#7c3aed;">${grand.mtdRP}</td>
       </tr>`;
 
     // ── HTML ───────────────────────────────────────────────────────────────
@@ -176,7 +180,7 @@ async function sendTideBTDailyReport(db) {
 </head>
 <body style="font-family:'Segoe UI',Arial,sans-serif;background:#f0f4f0;margin:0;padding:16px;color:#212121;">
   <div style="display:none;font-size:1px;max-height:0;overflow:hidden;">
-    TideBT Report &bull; FTD: ${plain(grand.ftdBT)} | MTD: ${plain(grand.mtdBT)} | RP: ${grand.rp} &bull; ${now.toISOString()} &bull; ${Math.random().toString(36).slice(2,8).toUpperCase()}
+    TideBT Report &bull; FTD: ${plain(grand.ftdBT)} | FTD RP: ${grand.ftdRP} | MTD: ${plain(grand.mtdBT)} | MTD RP: ${grand.mtdRP} &bull; ${now.toISOString()} &bull; ${Math.random().toString(36).slice(2,8).toUpperCase()}
     &zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;
   </div>
 
@@ -210,8 +214,8 @@ async function sendTideBTDailyReport(db) {
         <td width="3%"></td>
         <td width="23%" style="background:#ede9fe;border:1.5px solid #7c3aed;border-radius:10px;padding:16px 12px;text-align:center;vertical-align:top;">
           <div style="font-size:10px;color:#7c3aed;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">FTD RP</div>
-          <div style="font-size:10px;color:#aaa;margin-top:2px;">RP Active</div>
-          <div style="font-size:20px;font-weight:800;color:#7c3aed;margin-top:6px;">${grand.rp}</div>
+          <div style="font-size:10px;color:#aaa;margin-top:2px;">RP w/ BT Today</div>
+          <div style="font-size:20px;font-weight:800;color:#7c3aed;margin-top:6px;">${grand.ftdRP}</div>
         </td>
         <td width="3%"></td>
         <td width="23%" style="background:#fef3c7;border:1.5px solid #f59e0b;border-radius:10px;padding:16px 12px;text-align:center;vertical-align:top;">
@@ -222,8 +226,8 @@ async function sendTideBTDailyReport(db) {
         <td width="3%"></td>
         <td width="23%" style="background:#ede9fe;border:1.5px solid #7c3aed;border-radius:10px;padding:16px 12px;text-align:center;vertical-align:top;">
           <div style="font-size:10px;color:#7c3aed;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;">MTD RP</div>
-          <div style="font-size:10px;color:#aaa;margin-top:2px;">RP Active</div>
-          <div style="font-size:20px;font-weight:800;color:#7c3aed;margin-top:6px;">${grand.rp}</div>
+          <div style="font-size:10px;color:#aaa;margin-top:2px;">Total RP Active</div>
+          <div style="font-size:20px;font-weight:800;color:#7c3aed;margin-top:6px;">${grand.mtdRP}</div>
         </td>
       </tr></table>
     </div>
@@ -288,7 +292,7 @@ async function sendTideBTDailyReport(db) {
     });
 
     const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const subject = `[TideBT ${curMonth} ${curYear}] FTD ${plain(grand.ftdBT)} | MTD ${plain(grand.mtdBT)} | RP ${grand.rp} — Daily Report (${dateStr})`;
+    const subject = `[TideBT ${curMonth} ${curYear}] FTD ${plain(grand.ftdBT)} | FTD RP ${grand.ftdRP} | MTD ${plain(grand.mtdBT)} | MTD RP ${grand.mtdRP} — Daily Report (${dateStr})`;
 
     const info = await transporter.sendMail({
       from : `"Vegavruddhi TideBT" <${smtpUser}>`,
@@ -303,8 +307,10 @@ async function sendTideBTDailyReport(db) {
       messageId : info.messageId,
       recipients,
       ftdBT     : grand.ftdBT,
+      ftdRP     : grand.ftdRP,
       mtdBT     : grand.mtdBT,
-      rp        : grand.rp,
+      mtdRP     : grand.mtdRP,
+      rp        : grand.mtdRP,
       activeTLs : activeTLs.length
     };
 
