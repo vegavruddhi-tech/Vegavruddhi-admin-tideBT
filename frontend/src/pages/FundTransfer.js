@@ -329,6 +329,18 @@ export default function FundTransfer() {
     return ['Admin', 'VV'];
   }, []);
 
+  // Combined list of all people for Autocomplete (Admin, VV, TLs, FSEs, past senders/receivers)
+  const allPeopleOptions = useMemo(() => {
+    const set = new Set(['Admin', 'VV']);
+    tls.forEach(t => { if (t.name) set.add(t.name.trim()); });
+    fses.forEach(f => { if (f.name) set.add(f.name.trim()); });
+    payments.forEach(p => {
+      if (p.senderName) set.add(p.senderName.trim());
+      if (p.transferTo) set.add(p.transferTo.trim());
+    });
+    return [...set].sort();
+  }, [tls, fses, payments]);
+
   // Open edit modal
   const handleEditOpen = (p) => {
     setEditPayment(p);
@@ -963,25 +975,44 @@ export default function FundTransfer() {
       <Dialog open={!!editPayment} onClose={() => setEditPayment(null)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>✏️ Edit Payment</DialogTitle>
         <DialogContent>
-          <TextField select fullWidth label="Transfer to Whom" value={editFields.transferToWhom || ''}
+          <TextField select fullWidth label="Transfer to Whom" value={editFields.transferToWhom || ''} size="small"
             onChange={e => setEditFields(f => ({ ...f, transferToWhom: e.target.value }))} sx={{ mt: 1, mb: 2 }}>
             <MenuItem value="TL's & Managers">TL's & Managers</MenuItem>
             <MenuItem value="FSE Ground Team">FSE Ground Team</MenuItem>
           </TextField>
-          <TextField select fullWidth label="Sender Name" value={editFields.senderName || ''}
-            onChange={e => setEditFields(f => ({ ...f, senderName: e.target.value }))} sx={{ mb: 2 }}>
-            <MenuItem value="Admin">Admin</MenuItem>
-            <MenuItem value="VV">VV</MenuItem>
-            {tls.map(tl => <MenuItem key={tl.name} value={tl.name}>{tl.name}</MenuItem>)}
-          </TextField>
-          <TextField fullWidth label="Receiver" value={editFields.transferTo || ''}
-            onChange={e => setEditFields(f => ({ ...f, transferTo: e.target.value }))} sx={{ mb: 2 }} />
-          <TextField fullWidth type="number" label="Amount" value={editFields.amount || ''}
+
+          <Autocomplete
+            freeSolo
+            options={allPeopleOptions}
+            value={editFields.senderName || ''}
+            onInputChange={(_, val) => setEditFields(f => ({ ...f, senderName: val }))}
+            onChange={(_, val) => setEditFields(f => ({ ...f, senderName: val || '' }))}
+            renderInput={(params) => <TextField {...params} label="Sender Name *" fullWidth size="small" />}
+            sx={{ mb: 2 }}
+          />
+
+          <Autocomplete
+            freeSolo
+            options={allPeopleOptions}
+            value={editFields.transferTo || ''}
+            onInputChange={(_, val) => setEditFields(f => ({ ...f, transferTo: val }))}
+            onChange={(_, val) => setEditFields(f => ({ ...f, transferTo: val || '' }))}
+            renderInput={(params) => <TextField {...params} label="Receiver Name (Transfer To) *" fullWidth size="small" />}
+            sx={{ mb: 2 }}
+          />
+
+          <TextField fullWidth type="number" label="Amount *" value={editFields.amount || ''} size="small"
             onChange={e => setEditFields(f => ({ ...f, amount: e.target.value }))} sx={{ mb: 2 }}
-            helperText="Use negative value for fund return/deduction" />
-          <TextField fullWidth label="Payment Method" value={editFields.paymentDoneOn || ''}
-            onChange={e => setEditFields(f => ({ ...f, paymentDoneOn: e.target.value }))} sx={{ mb: 2 }} />
-          <TextField type="date" fullWidth label="Payment Date"
+            helperText="Use negative value (e.g. -10000) for fund return/deduction" />
+
+          <TextField select fullWidth label="Payment Method *" value={editFields.paymentDoneOn || ''} size="small"
+            onChange={e => setEditFields(f => ({ ...f, paymentDoneOn: e.target.value }))} sx={{ mb: 2 }}>
+            <MenuItem value="QR">QR</MenuItem>
+            <MenuItem value="Bank Account">Bank Account</MenuItem>
+            <MenuItem value="UPI">UPI</MenuItem>
+          </TextField>
+
+          <TextField type="date" fullWidth label="Payment Date *" size="small"
             value={editFields.paymentDate || ''}
             onChange={e => setEditFields(f => ({ ...f, paymentDate: e.target.value }))}
             InputLabelProps={{ shrink: true }} sx={{ mb: 1 }} />
