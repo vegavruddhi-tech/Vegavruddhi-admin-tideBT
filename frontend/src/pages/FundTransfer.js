@@ -393,7 +393,7 @@ export default function FundTransfer() {
         'Sender': isReturn ? p.transferTo : p.senderName || '-',
         'Receiver': isReturn ? p.senderName : p.transferTo || '-',
         'Type': isReturn ? 'Return' : (p.transferToWhom === "TL's & Managers" ? 'TL/Mgr' : 'FSE'),
-        'Amount (₹)': Math.abs(p.amount || 0),
+        'Amount (₹)': p.amount || 0,
         'Method': p.paymentDoneOn || '-',
         'Date': p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '-'
       };
