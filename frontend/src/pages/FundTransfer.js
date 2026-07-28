@@ -11,6 +11,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import DateFilter from '../components/DateFilter';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
@@ -384,6 +385,26 @@ export default function FundTransfer() {
     window.open(downloadUrl, '_blank');
   };
 
+  const handleExportPaymentHistoryExcel = (paymentsToExport) => {
+    const exportData = (paymentsToExport || []).map((p, i) => {
+      const isReturn = (p.amount || 0) < 0;
+      return {
+        '#': i + 1,
+        'Sender': isReturn ? p.transferTo : p.senderName || '-',
+        'Receiver': isReturn ? p.senderName : p.transferTo || '-',
+        'Type': isReturn ? 'Return' : (p.transferToWhom === "TL's & Managers" ? 'TL/Mgr' : 'FSE'),
+        'Amount (₹)': Math.abs(p.amount || 0),
+        'Method': p.paymentDoneOn || '-',
+        'Date': p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '-'
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Payment History');
+    XLSX.writeFile(wb, `Payment_History_${selectedMonth || 'All'}_${selectedYear || '2026'}.xlsx`);
+  };
+
   if (loading) {
     return <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px"><CircularProgress /></Box>;
   }
@@ -533,11 +554,6 @@ export default function FundTransfer() {
         <Grid item xs={12} md={7}>
           <Card sx={{ borderRadius: 2, border: '1.5px solid #e0e0e0' }}>
             <CardContent>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5} flexWrap="wrap" gap={1}>
-                <Typography variant="h6" fontWeight={700}>Payment History</Typography>
-                <Chip label={`Total: ₹${totalAmount.toLocaleString()}`} sx={{ bgcolor: '#e6f4ea', color: '#2e7d32', fontWeight: 700 }} />
-              </Box>
-
               {/* Sender / Receiver filters */}
               {(() => {
                 const uniqueSenders   = [...new Set(payments.map(p => (p.senderName || '').trim()).filter(Boolean))].sort();
@@ -551,6 +567,21 @@ export default function FundTransfer() {
                 });
                 return (
                   <>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={1.5} flexWrap="wrap" gap={1}>
+                      <Typography variant="h6" fontWeight={700}>Payment History</Typography>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          startIcon={<DownloadIcon />}
+                          onClick={() => handleExportPaymentHistoryExcel(historyPayments)}
+                          sx={{ bgcolor: '#1a5c38', fontWeight: 700, fontSize: 12, textTransform: 'none', px: 1.5, '&:hover': { bgcolor: '#124127' } }}
+                        >
+                          Download Excel
+                        </Button>
+                        <Chip label={`Total: ₹${totalAmount.toLocaleString()}`} sx={{ bgcolor: '#e6f4ea', color: '#2e7d32', fontWeight: 700 }} />
+                      </Box>
+                    </Box>
                     <Box sx={{ display: 'flex', gap: 1.5, mb: 2, flexWrap: 'wrap' }}>
                       <TextField select size="small" label="Sender" value={paymentSenderFilter}
                         onChange={e => setPaymentSenderFilter(e.target.value)} sx={{ minWidth: 160 }}>
