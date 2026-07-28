@@ -413,7 +413,7 @@ router.get('/merchants/:fseName', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-// GET /api/fse/export-excel — Export FSE Onboarding Forms & Merchant BT Data to Excel
+// GET /api/fse/export-excel — Export ONLY FSE Onboarding Forms to Excel
 router.get('/export-excel', async (req, res) => {
   try {
     const XLSX = require('xlsx');
@@ -454,7 +454,7 @@ router.get('/export-excel', async (req, res) => {
       });
     };
 
-    // ── 1. Load Forms Data ──
+    // ── Load Forms Data ONLY ──
     const [sheetForms, appForms, mobikwikForms] = await Promise.all([
       db.collection('TideBT Form Responses').find({}).sort({ createdAt: -1 }).toArray(),
       db.collection('tidebt_form_responses').find({}).sort({ createdAt: -1 }).toArray(),
@@ -464,9 +464,10 @@ router.get('/export-excel', async (req, res) => {
     const rawForms = [...sheetForms, ...appForms, ...mobikwikForms];
     const filteredForms = filterByDate(rawForms, 'createdAt');
 
-    const sheet1Data = filteredForms.map(f => {
+    const sheetData = filteredForms.map((f, i) => {
       const isMK = f.formType === 'mobikwik-withdraw';
       return {
+        '#': i + 1,
         'FSE Name': f.employeeName || f.fseName || '–',
         'Merchant / Customer': f.merchantName || f.customerName || '–',
         'Mobile Number': f.merchantNumber || f.customerNumber || '–',
@@ -479,54 +480,15 @@ router.get('/export-excel', async (req, res) => {
       };
     });
 
-    // ── 2. Load Merchant BT Data ──
-    const btMonth = selectedMonth || 'July';
-    const allCollections = (await db.listCollections().toArray()).map(c => c.name);
-    const btColName = findBTCollection(allCollections, btMonth, selectedYear);
-
-    let sheet2Data = [];
-    if (btColName) {
-      const btDocs = await db.collection(btColName).find({}).limit(5000).toArray();
-      const masterDocs = await db.collection('bt_master').find({}).toArray();
-      const masterMap = {};
-      masterDocs.forEach(m => {
-        if (m.merchantNumber) masterMap[m.merchantNumber.trim()] = m;
-      });
-
-      sheet2Data = btDocs.map(r => {
-        const num = (r.merchantNumber || '').trim();
-        const master = masterMap[num] || {};
-        const stage3Raw = r.stage3 || r.Stage_3 || r['Stage-3'] || '0';
-        const stage3 = parseFloat(String(stage3Raw).replace(/,/g, '')) || 0;
-        return {
-          'FSE Name': master.fseName || r.fseName || '–',
-          'TL Name': master.tl || r.tl || '–',
-          'Merchant Mobile': num,
-          'Merchant Name': master.merchantName || r.merchantName || '–',
-          'Month': btMonth,
-          'Stage 3 BT (₹)': stage3,
-          'Reward Pass Status': r.rewardPassPro || r.priorityPassPro || '–',
-          'Pass Live Status': r.passLive || '–',
-          'UPI Active': r.upiActive || '–'
-        };
-      });
-    }
-
-    // Build Workbook
+    // Build Workbook with ONLY FSE Onboarding Forms sheet
     const wb = XLSX.utils.book_new();
-
-    const ws1 = XLSX.utils.json_to_sheet(sheet1Data);
-    XLSX.utils.book_append_sheet(wb, ws1, 'FSE Onboarding Forms');
-
-    if (sheet2Data.length > 0) {
-      const ws2 = XLSX.utils.json_to_sheet(sheet2Data);
-      XLSX.utils.book_append_sheet(wb, ws2, 'FSE Merchants BT Data');
-    }
+    const ws = XLSX.utils.json_to_sheet(sheetData);
+    XLSX.utils.book_append_sheet(wb, ws, 'FSE Onboarding Forms');
 
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="FSE_Onboarding_Forms_Report_${selectedMonth || 'All'}_${selectedYear || '2026'}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="FSE_Onboarding_Forms_${selectedMonth || 'All'}_${selectedYear || '2026'}.xlsx"`);
     return res.send(buffer);
 
   } catch (error) {
