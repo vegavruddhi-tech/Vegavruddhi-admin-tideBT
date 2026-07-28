@@ -12,6 +12,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import VisibilityIcon from '@mui/icons-material/Visibility'; // eslint-disable-line no-unused-vars
 import RefreshIcon from '@mui/icons-material/Refresh';
+import DownloadIcon from '@mui/icons-material/Download';
 import StorefrontIcon from '@mui/icons-material/Storefront'; // eslint-disable-line no-unused-vars
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import DateFilter from '../components/DateFilter';
@@ -566,6 +567,22 @@ export default function FSEOverview() {
               <StorefrontIcon sx={{ fontSize: 14, mr: 0.5 }} />Merchants
             </ToggleButton>
           </ToggleButtonGroup>
+          <Button
+            startIcon={<DownloadIcon />}
+            onClick={() => {
+              const params = new URLSearchParams();
+              if (dateFilter) params.set('dateFilter', dateFilter);
+              if (selectedYear) params.set('selectedYear', String(selectedYear));
+              if (selectedMonth) params.set('selectedMonth', selectedMonth);
+              if (dateFilter === 'custom' && fromDate) params.set('fromDate', fromDate);
+              if (dateFilter === 'custom' && toDate) params.set('toDate', toDate);
+              window.open(`${API_URL}/fse/export-excel?${params.toString()}`, '_blank');
+            }}
+            variant="contained"
+            sx={{ bgcolor: '#1a5c38', fontWeight: 700, textTransform: 'none', px: 2, '&:hover': { bgcolor: '#124127' } }}
+          >
+            Download Excel
+          </Button>
           <Button startIcon={<RefreshIcon />}
             onClick={() => viewMode === 'merchants' ? fetchMerchantData() : fetchData()}
             variant="outlined"

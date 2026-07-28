@@ -456,6 +456,128 @@ router.get('/:name', async (req, res) => {
   }
 });
 
+// GET /api/fse/export-excel — Export FSE Onboarding Forms & Merchant BT Data to Excel
+router.get('/export-excel', async (req, res) => {
+  try {
+    const XLSX = require('xlsx');
+    const db = req.db;
+    const { selectedYear, selectedMonth, dateFilter, fromDate, toDate } = req.query;
+
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+    const now = new Date();
+
+    const isFilterActive = !!(dateFilter && dateFilter !== 'all') || !!selectedYear || !!selectedMonth;
+
+    const filterByDate = (items, dateField = 'createdAt') => {
+      if (!isFilterActive) return items;
+      const today      = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      return items.filter(item => {
+        if (!item[dateField]) return false;
+        const d = new Date(item[dateField]);
+        if (isNaN(d.getTime())) return false;
+        if (dateFilter === 'today')  return d >= today && d < new Date(today.getTime() + 86400000);
+        if (dateFilter === 'month')  return d >= monthStart && d <= monthEnd;
+        if (dateFilter === 'custom') {
+          if (fromDate) {
+            const from = new Date(fromDate);
+            if (!isNaN(from.getTime()) && d < from) return false;
+          }
+          if (toDate) {
+            const to = new Date(toDate + 'T23:59:59');
+            if (!isNaN(to.getTime()) && d > to) return false;
+          }
+          return true;
+        }
+        if (selectedYear  && d.getFullYear() !== parseInt(selectedYear)) return false;
+        if (selectedMonth && MONTHS[d.getMonth()] !== selectedMonth) return false;
+        return true;
+      });
+    };
+
+    // ── 1. Load Forms Data ──
+    const [sheetForms, appForms, mobikwikForms] = await Promise.all([
+      db.collection('TideBT Form Responses').find({}).sort({ createdAt: -1 }).toArray(),
+      db.collection('tidebt_form_responses').find({}).sort({ createdAt: -1 }).toArray(),
+      db.collection('TideBT_Mobikwik').find({}).sort({ createdAt: -1 }).toArray()
+    ]);
+
+    const rawForms = [...sheetForms, ...appForms, ...mobikwikForms];
+    const filteredForms = filterByDate(rawForms, 'createdAt');
+
+    const sheet1Data = filteredForms.map(f => {
+      const isMK = f.formType === 'mobikwik-withdraw';
+      return {
+        'FSE Name': f.employeeName || f.fseName || '–',
+        'Merchant / Customer': f.merchantName || f.customerName || '–',
+        'Mobile Number': f.merchantNumber || f.customerNumber || '–',
+        'Form Type': isMK ? 'Mobikwik' : 'Daily Visit',
+        'Category / Details': isMK ? `Withdrawal ₹${f.withdrawAmount || 0}` : (f.merchantCategory || '–'),
+        'Opinion / Status': isMK ? (f.status || f.onboardingStatus || 'Pending') : (f.merchantOpinion || f.onboardingStatus || '–'),
+        'Withdraw Amount (₹)': isMK ? (f.withdrawAmount || 0) : 0,
+        'Withdraw Fee (₹)': isMK ? Math.round((f.withdrawAmount || 0) * 0.03 * 100) / 100 : 0,
+        'Date': f.createdAt ? new Date(f.createdAt).toLocaleDateString('en-IN') : '–'
+      };
+    });
+
+    // ── 2. Load Merchant BT Data ──
+    const btMonth = selectedMonth || 'July';
+    const allCollections = (await db.listCollections().toArray()).map(c => c.name);
+    const btColName = findBTCollection(allCollections, btMonth, selectedYear);
+
+    let sheet2Data = [];
+    if (btColName) {
+      const btDocs = await db.collection(btColName).find({}).limit(5000).toArray();
+      const masterDocs = await db.collection('bt_master').find({}).toArray();
+      const masterMap = {};
+      masterDocs.forEach(m => {
+        if (m.merchantNumber) masterMap[m.merchantNumber.trim()] = m;
+      });
+
+      sheet2Data = btDocs.map(r => {
+        const num = (r.merchantNumber || '').trim();
+        const master = masterMap[num] || {};
+        const stage3Raw = r.stage3 || r.Stage_3 || r['Stage-3'] || '0';
+        const stage3 = parseFloat(String(stage3Raw).replace(/,/g, '')) || 0;
+        return {
+          'FSE Name': master.fseName || r.fseName || '–',
+          'TL Name': master.tl || r.tl || '–',
+          'Merchant Mobile': num,
+          'Merchant Name': master.merchantName || r.merchantName || '–',
+          'Month': btMonth,
+          'Stage 3 BT (₹)': stage3,
+          'Reward Pass Status': r.rewardPassPro || r.priorityPassPro || '–',
+          'Pass Live Status': r.passLive || '–',
+          'UPI Active': r.upiActive || '–'
+        };
+      });
+    }
+
+    // Build Workbook
+    const wb = XLSX.utils.book_new();
+
+    const ws1 = XLSX.utils.json_to_sheet(sheet1Data);
+    XLSX.utils.book_append_sheet(wb, ws1, 'FSE Onboarding Forms');
+
+    if (sheet2Data.length > 0) {
+      const ws2 = XLSX.utils.json_to_sheet(sheet2Data);
+      XLSX.utils.book_append_sheet(wb, ws2, 'FSE Merchants BT Data');
+    }
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="FSE_Onboarding_Forms_Report_${selectedMonth || 'All'}_${selectedYear || '2026'}.xlsx"`);
+    return res.send(buffer);
+
+  } catch (error) {
+    console.error('Error exporting FSE excel:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // POST /api/fse/cache/bust — manually clear all FSE overview caches
 // Call this after running sync scripts that update bt_master or BT_TL_CONNECT
 router.post('/cache/bust', async (req, res) => {
@@ -469,3 +591,4 @@ router.post('/cache/bust', async (req, res) => {
 });
 
 module.exports = router;
+
