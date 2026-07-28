@@ -8,6 +8,7 @@ import {
 import RefreshIcon from '@mui/icons-material/Refresh';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import DownloadIcon from '@mui/icons-material/Download';
 import DateFilter from '../components/DateFilter';
 import axios from 'axios';
 
@@ -371,14 +372,46 @@ export default function FundTransfer() {
     }
   };
 
+  const handleExportExcel = () => {
+    const params = new URLSearchParams();
+    if (dateFilter) params.set('dateFilter', dateFilter);
+    if (selectedYear) params.set('selectedYear', selectedYear);
+    if (selectedMonth) params.set('selectedMonth', selectedMonth);
+    if (dateFilter === 'custom' && fromDate) params.set('fromDate', fromDate);
+    if (dateFilter === 'custom' && toDate) params.set('toDate', toDate);
+
+    const downloadUrl = `${API_URL}/fund-transfer/export-excel?${params.toString()}`;
+    window.open(downloadUrl, '_blank');
+  };
+
   if (loading) {
     return <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px"><CircularProgress /></Box>;
   }
 
   return (
     <Box p={3}>
-      <Typography variant="h4" fontWeight={700} gutterBottom>💰 BT Payment Tracker</Typography>
-      <Typography variant="body2" color="text.secondary" mb={2}>For daily money tracking</Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, flexWrap: 'wrap', gap: 1 }}>
+        <Box>
+          <Typography variant="h4" fontWeight={700}>💰 BT Payment Tracker</Typography>
+          <Typography variant="body2" color="text.secondary">For daily money tracking</Typography>
+        </Box>
+        <Button
+          variant="contained"
+          startIcon={<DownloadIcon />}
+          onClick={handleExportExcel}
+          sx={{
+            fontWeight: 700,
+            borderRadius: 2,
+            px: 2.5,
+            py: 1,
+            textTransform: 'none',
+            bgcolor: '#1a5c38',
+            '&:hover': { bgcolor: '#124127' }
+          }}
+        >
+          Download Excel Report
+        </Button>
+      </Box>
 
       <DateFilter
         dateFilter={dateFilter} setDateFilter={setDateFilter}

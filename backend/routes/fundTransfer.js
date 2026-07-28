@@ -725,6 +725,173 @@ router.post('/', async (req, res) => {
   }
 });
 
+// GET /api/fund-transfer/export-excel — Export complete Fund Transfer & BT Onboarding report to Excel (.xlsx)
+router.get('/export-excel', async (req, res) => {
+  try {
+    const XLSX = require('xlsx');
+    const db = req.db;
+    const { selectedYear, selectedMonth, dateFilter, fromDate, toDate } = req.query;
+
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+    const now = new Date();
+
+    const isFilterActive = !!(dateFilter && dateFilter !== 'all') || !!selectedYear || !!selectedMonth;
+
+    const filterByDate = (items, dateField = 'createdAt') => {
+      if (!isFilterActive) return items;
+      const today      = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      return items.filter(item => {
+        if (!item[dateField]) return false;
+        const d = new Date(item[dateField]);
+        if (isNaN(d.getTime())) return false;
+        if (dateFilter === 'today')  return d >= today && d < new Date(today.getTime() + 86400000);
+        if (dateFilter === 'month')  return d >= monthStart && d <= monthEnd;
+        if (dateFilter === 'custom') {
+          if (fromDate) {
+            const from = new Date(fromDate);
+            if (!isNaN(from.getTime()) && d < from) return false;
+          }
+          if (toDate) {
+            const to = new Date(toDate + 'T23:59:59');
+            if (!isNaN(to.getTime()) && d > to) return false;
+          }
+          return true;
+        }
+        if (selectedYear  && d.getFullYear() !== parseInt(selectedYear)) return false;
+        if (selectedMonth && MONTHS[d.getMonth()] !== selectedMonth) return false;
+        return true;
+      });
+    };
+
+    // ── Sheet 1: Fund Usage Summary Data ──
+    const summaryResponse = await new Promise((resolve) => {
+      // Re-use logic by querying internal handler if cache exists or computing
+      const getCacheKey = (q) => `usage:${q.selectedMonth || 'all'}:${q.selectedYear || 'all'}:${q.dateFilter || 'all'}:${q.fromDate || ''}:${q.toDate || ''}`;
+      const cacheKey = getCacheKey(req.query);
+      db.collection(CACHE_COLLECTION).findOne({ cacheKey })
+        .then(doc => resolve(doc ? doc.data : null))
+        .catch(() => resolve(null));
+    });
+
+    let summaryList = [];
+    if (summaryResponse && summaryResponse.summary) {
+      summaryList = summaryResponse.summary;
+    } else {
+      // Fetch payments to construct minimal summary if cache miss
+      const allPayments = await db.collection('TideBT_Payments').find({}).toArray();
+      const filteredPayments = filterByDate(allPayments, 'createdAt');
+      summaryList = filteredPayments.map(p => ({
+        name: p.transferTo || 'Unknown',
+        type: p.transferToWhom || 'N/A',
+        received: p.amount > 0 ? p.amount : 0,
+        deduction: p.amount < 0 ? Math.abs(p.amount) : 0,
+        carryForward: 0,
+        totalAvailable: p.amount > 0 ? p.amount : 0,
+        usedBT: 0,
+        usedRP: 0,
+        rpCount: 0,
+        btFee: 0,
+        withdrawAmount: 0,
+        totalUsed: 0,
+        fundLeft: p.amount
+      }));
+    }
+
+    const sheet1Data = summaryList.map(item => ({
+      'Person Name': item.name || '',
+      'Category / Role': item.type || '',
+      'Net Received (₹)': item.received || 0,
+      'Carry Forward (₹)': item.carryForward || 0,
+      'Total Available (₹)': item.totalAvailable || 0,
+      'Deductions / Returns (₹)': item.deduction || 0,
+      'BT Done (₹)': item.usedBT || 0,
+      'Reward Pass Count': item.rpCount || 0,
+      'RP Cost (₹)': item.usedRP || 0,
+      'BT Fee (1.5%) (₹)': item.btFee || 0,
+      'Mobikwik Withdraw (₹)': item.withdrawAmount || 0,
+      'Total Used (₹)': item.totalUsed || 0,
+      'Fund Left (₹)': item.fundLeft || 0
+    }));
+
+    // ── Sheet 2: Fund Transfers History ──
+    const allPayments = await db.collection('TideBT_Payments').find({}).sort({ createdAt: -1 }).toArray();
+    const filteredPayments = filterByDate(allPayments, 'createdAt');
+
+    const sheet2Data = filteredPayments.map(p => ({
+      'Date': p.createdAt ? new Date(p.createdAt).toLocaleDateString('en-IN') : '',
+      'Category': p.transferToWhom || '',
+      'Sender Name': p.senderName || '',
+      'Receiver Name (Transfer To)': p.transferTo || '',
+      'Amount (₹)': p.amount || 0,
+      'Payment Done On': p.paymentDoneOn || ''
+    }));
+
+    // ── Sheet 3: BT Onboarding & Merchants ──
+    const btMonth = selectedMonth || 'July';
+    const findBTCollection = (cols, m) => {
+      const mu = m.toUpperCase();
+      return cols.find(c => c.toUpperCase().startsWith('BT_TL_CONNECT') && c.toUpperCase().includes(mu)) || null;
+    };
+    const allCols = (await db.listCollections().toArray()).map(c => c.name);
+    const btColName = findBTCollection(allCols, btMonth);
+
+    let sheet3Data = [];
+    if (btColName) {
+      const btDocs = await db.collection(btColName).find({}).limit(5000).toArray();
+      const masterDocs = await db.collection('bt_master').find({}).toArray();
+      const masterMap = {};
+      masterDocs.forEach(m => {
+        if (m.merchantNumber) masterMap[m.merchantNumber.trim()] = m;
+      });
+
+      sheet3Data = btDocs.map(r => {
+        const num = (r.merchantNumber || '').trim();
+        const master = masterMap[num] || {};
+        const stage3Raw = r.stage3 || r.Stage_3 || r['Stage-3'] || '0';
+        const stage3 = parseFloat(String(stage3Raw).replace(/,/g, '')) || 0;
+        return {
+          'Merchant Mobile': num,
+          'Merchant Name': master.merchantName || r.merchantName || '–',
+          'FSE Name': master.fseName || r.fseName || '–',
+          'TL Name': master.tl || r.tl || '–',
+          'Month': btMonth,
+          'Stage 3 BT (₹)': stage3,
+          'Reward Pass Status': r.rewardPassPro || r.priorityPassPro || '–',
+          'Pass Live Status': r.passLive || '–',
+          'UPI Active': r.upiActive || '–'
+        };
+      });
+    }
+
+    // Create Workbook
+    const wb = XLSX.utils.book_new();
+
+    const ws1 = XLSX.utils.json_to_sheet(sheet1Data);
+    XLSX.utils.book_append_sheet(wb, ws1, 'Fund Usage Summary');
+
+    const ws2 = XLSX.utils.json_to_sheet(sheet2Data);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Fund Transfers History');
+
+    if (sheet3Data.length > 0) {
+      const ws3 = XLSX.utils.json_to_sheet(sheet3Data);
+      XLSX.utils.book_append_sheet(wb, ws3, 'BT Onboarding Data');
+    }
+
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="Vegavruddhi_Fund_and_BT_Report_${selectedMonth || 'All'}_${selectedYear || '2026'}.xlsx"`);
+    return res.send(buffer);
+
+  } catch (error) {
+    console.error('Error exporting excel:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // POST /api/fund-transfer/cache/bust — manually clear summary cache
 // Call this after running sync scripts (opening balances, BT data, etc.)
 router.post('/cache/bust', async (req, res) => {
@@ -796,3 +963,4 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+
