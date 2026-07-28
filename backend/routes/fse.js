@@ -413,49 +413,6 @@ router.get('/merchants/:fseName', async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-// GET /api/fse/:name - Get single FSE details
-router.get('/:name', async (req, res) => {
-  try {
-    const db = req.db;
-    const fseName = req.params.name;
-    
-    // Get FSE from access list
-    const access = await db.collection('TideBT_Access').findOne({ 
-      name: fseName, 
-      role: 'FSE' 
-    });
-    
-    if (!access) {
-      return res.status(404).json({ success: false, error: 'FSE not found' });
-    }
-    
-    // Get employee details
-    const employee = await db.collection('Employees').findOne({ 
-      newJoinerName: fseName 
-    });
-    
-    // Get form count
-    const formCount = await db.collection('TideBT Form Responses').countDocuments({ 
-      employeeName: fseName 
-    });
-    
-    const fseDetails = {
-      name: access.name,
-      phone: employee?.newJoinerPhone || '',
-      email: employee?.newJoinerEmailId || '',
-      reportingManager: employee?.reportingManager || '',
-      status: access.status || 'active',
-      createdAt: access.createdAt,
-      totalForms: formCount
-    };
-    
-    res.json({ success: true, fse: fseDetails });
-  } catch (error) {
-    console.error('Error fetching FSE details:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // GET /api/fse/export-excel — Export FSE Onboarding Forms & Merchant BT Data to Excel
 router.get('/export-excel', async (req, res) => {
   try {
@@ -574,6 +531,49 @@ router.get('/export-excel', async (req, res) => {
 
   } catch (error) {
     console.error('Error exporting FSE excel:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET /api/fse/:name - Get single FSE details
+router.get('/:name', async (req, res) => {
+  try {
+    const db = req.db;
+    const fseName = req.params.name;
+    
+    // Get FSE from access list
+    const access = await db.collection('TideBT_Access').findOne({ 
+      name: fseName, 
+      role: 'FSE' 
+    });
+    
+    if (!access) {
+      return res.status(404).json({ success: false, error: 'FSE not found' });
+    }
+    
+    // Get employee details
+    const employee = await db.collection('Employees').findOne({ 
+      newJoinerName: fseName 
+    });
+    
+    // Get form count
+    const formCount = await db.collection('TideBT Form Responses').countDocuments({ 
+      employeeName: fseName 
+    });
+    
+    const fseDetails = {
+      name: access.name,
+      phone: employee?.newJoinerPhone || '',
+      email: employee?.newJoinerEmailId || '',
+      reportingManager: employee?.reportingManager || '',
+      status: access.status || 'active',
+      createdAt: access.createdAt,
+      totalForms: formCount
+    };
+    
+    res.json({ success: true, fse: fseDetails });
+  } catch (error) {
+    console.error('Error fetching FSE details:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
