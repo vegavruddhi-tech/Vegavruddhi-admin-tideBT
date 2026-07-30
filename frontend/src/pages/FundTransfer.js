@@ -12,6 +12,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import DateFilter from '../components/DateFilter';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
+import { getOverviewCache, setOverviewCache } from '../utils/overviewCache';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
@@ -94,16 +95,21 @@ export default function FundTransfer() {
       .finally(() => setSummaryLoading(false));
   }, [dateFilter, selectedYear, selectedMonth, fromDate, toDate]);
 
-  const fetchData = async () => {
-    // Show cached data instantly for FSEs/TLs only (payments too large for localStorage)
-    try {
-      const cachedFSEs  = localStorage.getItem('admin_fses');
-      const cachedTLs   = localStorage.getItem('admin_tls');
-      if (cachedFSEs) setFses(JSON.parse(cachedFSEs));
-      if (cachedTLs)  setTls(JSON.parse(cachedTLs));
-      if (cachedFSEs) setLoading(false);
-    } catch {}
+  const fetchData = async (forceRefresh = false) => {
+    const cacheKey = 'FUND_TRANSFER_MAIN';
+    if (!forceRefresh) {
+      const cached = getOverviewCache(cacheKey);
+      if (cached) {
+        setFses(cached.fses);
+        setTls(cached.tls);
+        setPayments(cached.payments);
+        setMobikwikForms(cached.mobikwikForms);
+        setLoading(false);
+        return;
+      }
+    }
 
+    setLoading(true);
     try {
       const [fseRes, tlRes, paymentsRes, formsRes] = await Promise.all([
         axios.get(`${API_URL}/fse`),
@@ -111,17 +117,16 @@ export default function FundTransfer() {
         axios.get(`${API_URL}/fund-transfer`).catch(() => ({ data: { transfers: [] } })),
         axios.get(`${API_URL}/forms?limit=5000`).catch(() => ({ data: { forms: [] } }))
       ]);
-      const fses    = fseRes.data.fses   || [];
-      const tls     = tlRes.data.tls     || [];
+      const fses = fseRes.data.fses || [];
+      const tls = tlRes.data.tls || [];
       const allPayments = paymentsRes.data.transfers || [];
       const mkForms = (formsRes.data.forms || []).filter(f => f.formType === 'mobikwik-withdraw');
       setFses(fses);
       setTls(tls);
       setPayments(allPayments);
       setMobikwikForms(mkForms);
-      // Only cache small data in localStorage
-      try { localStorage.setItem('admin_fses', JSON.stringify(fses)); } catch {}
-      try { localStorage.setItem('admin_tls',  JSON.stringify(tls));  } catch {}
+
+      setOverviewCache(cacheKey, { fses, tls, payments: allPayments, mobikwikForms: mkForms });
     } catch (err) {
       console.error('Error fetching data:', err);
     } finally {
