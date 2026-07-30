@@ -103,10 +103,10 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
   const colDataMap = {}; // collectionName → { [merchantNumber]: { stage3, rp } }
   if (allNums.length > 0) {
     await Promise.all([...uniqueCols].map(async col => {
-      const docs = await db.collection(col).find(
-        { merchantNumber: { $in: allNums } },
-        { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1 } }
-      ).toArray();
+      const docs = await db.collection(col)
+        .find({ merchantNumber: { $in: allNums } })
+        .project({ merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1 })
+        .toArray();
       const lookup = {};
       docs.forEach(r => {
         const num = (r.merchantNumber || '').trim();
@@ -284,9 +284,23 @@ router.get('/usage-summary', async (req, res) => {
     };
 
     // ── Load raw data simultaneously (Promise.all) ────────────────────────
+    const paymentQuery = {};
+    if (selectedYear && !selectedMonth && (!dateFilter || dateFilter === 'all')) {
+      const yr = parseInt(selectedYear);
+      if (!isNaN(yr)) {
+        paymentQuery.createdAt = { $gte: new Date(yr, 0, 1), $lte: new Date(yr, 11, 31, 23, 59, 59, 999) };
+      }
+    }
+
     const [allPayments, accessList] = await Promise.all([
-      db.collection('TideBT_Payments').find({}).toArray(),
-      db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray()
+      db.collection('TideBT_Payments')
+        .find(paymentQuery)
+        .project({ transferTo: 1, senderName: 1, transferToWhom: 1, amount: 1, createdAt: 1, source: 1, paymentDoneOn: 1 })
+        .toArray(),
+      db.collection('TideBT_Access')
+        .find({ hasTideBTAccess: true })
+        .project({ fseName: 1, tlName: 1, fseEmail: 1, tlEmail: 1 })
+        .toArray()
     ]);
     const filteredPayments = filterByDate(allPayments, 'createdAt');
 
@@ -395,14 +409,18 @@ router.get('/usage-summary', async (req, res) => {
 
     // Build numToFSE from bt_master + TideBT Form Responses (Parallel fetch)
     const [masterDocsAll, formDocsAll, withdrawDataRaw] = await Promise.all([
-      db.collection('bt_master').find(
-        {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
-      ).toArray(),
-      db.collection('TideBT Form Responses').find(
-        { merchantNumber: { $exists: true, $ne: '' } },
-        { projection: { merchantNumber: 1, employeeName: 1, _id: 0 } }
-      ).toArray(),
-      db.collection('TideBT_Mobikwik').find({ formType: 'mobikwik-withdraw' }).toArray()
+      db.collection('bt_master')
+        .find({})
+        .project({ merchantNumber: 1, fseName: 1, _id: 0 })
+        .toArray(),
+      db.collection('TideBT Form Responses')
+        .find({ merchantNumber: { $exists: true, $ne: '' } })
+        .project({ merchantNumber: 1, employeeName: 1, _id: 0 })
+        .toArray(),
+      db.collection('TideBT_Mobikwik')
+        .find({ formType: 'mobikwik-withdraw' })
+        .project({ amount: 1, employeeName: 1, fseName: 1, createdAt: 1, date: 1, _id: 0 })
+        .toArray()
     ]);
 
     const numToFSE = {};
@@ -422,10 +440,10 @@ router.get('/usage-summary', async (req, res) => {
 
       // Get BT data from BT_TL_CONNECT — only for known merchant numbers
       const btDocs = allMerchantNums.length > 0
-        ? await db.collection(btCollectionName).find(
-            { merchantNumber: { $in: allMerchantNums } },
-            { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1, _id: 0 } }
-          ).toArray()
+        ? await db.collection(btCollectionName)
+            .find({ merchantNumber: { $in: allMerchantNums } })
+            .project({ merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1, _id: 0 })
+            .toArray()
         : [];
 
       btDocs.forEach(r => {

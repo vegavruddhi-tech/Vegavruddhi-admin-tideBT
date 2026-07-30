@@ -73,10 +73,10 @@ router.get('/merchants/all', async (req, res) => {
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     // Step 1: FSE names + TL mapping
-    const accessList = await db.collection('TideBT_Access').find(
-      { hasTideBTAccess: true },
-      { projection: { fseName: 1, tlName: 1, _id: 0 } }
-    ).toArray();
+    const accessList = await db.collection('TideBT_Access')
+      .find({ hasTideBTAccess: true })
+      .project({ fseName: 1, tlName: 1, _id: 0 })
+      .toArray();
     const fseNames = [...new Set(accessList.map(a => a.fseName).filter(Boolean))];
     if (fseNames.length === 0) return res.json({ success: true, data: [], btCollection: null });
 
@@ -88,9 +88,10 @@ router.get('/merchants/all', async (req, res) => {
     const btCollectionName = findBTCollection(allCollections, selectedMonth, selectedYear);
 
     // Step 3: bt_master — count merchants per FSE + get all numbers
-    const masterDocs = await db.collection('bt_master').find(
-      {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
-    ).toArray();
+    const masterDocs = await db.collection('bt_master')
+      .find({})
+      .project({ merchantNumber: 1, fseName: 1, _id: 0 })
+      .toArray();
 
     // Fast name normalization helper (O(1) hash map lookup instead of 500,000 regex matches)
     const norm = name => (name || '').toLowerCase().replace(/\s*\d*$/, '').trim();
@@ -112,10 +113,10 @@ router.get('/merchants/all', async (req, res) => {
     // Step 4: BT metrics from BT_TL_CONNECT — aggregate by merchantNumber
     const btMetrics = {}; // fseName → {totalBT, btDone, rpDone, passLive, yesterdayBT}
     if (btCollectionName && allNums.length > 0) {
-      const btDocs = await db.collection(btCollectionName).find(
-        { merchantNumber: { $in: allNums } },
-        { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, passLive: 1, priorityPassPro: 1, yesterdaysStage3: 1, yesterday_s_stage_3: 1, _id: 0 } }
-      ).toArray();
+      const btDocs = await db.collection(btCollectionName)
+        .find({ merchantNumber: { $in: allNums } })
+        .project({ merchantNumber: 1, stage3: 1, rewardPassPro: 1, passLive: 1, priorityPassPro: 1, yesterdaysStage3: 1, yesterday_s_stage_3: 1, _id: 0 })
+        .toArray();
 
       // Build num→fse map
       const numToFse = {};
@@ -183,14 +184,15 @@ router.get('/merchants/all-details', async (req, res) => {
 
     // Parallel fetch: get ALL merchants from bt_master AND BT collection simultaneously!
     const [masterDocs, btDocs] = await Promise.all([
-      db.collection('bt_master').find(
-        {}, { projection: { merchantNumber: 1, merchantName: 1, fseName: 1, tl: 1, _id: 0 } }
-      ).toArray(),
+      db.collection('bt_master')
+        .find({})
+        .project({ merchantNumber: 1, merchantName: 1, fseName: 1, tl: 1, _id: 0 })
+        .toArray(),
       btCollectionName
-        ? db.collection(btCollectionName).find(
-            {},
-            { projection: { merchantNumber: 1, stage3: 1, stage3Gap: 1, passLive: 1, pass_live: 1, Pass_Live: 1, rewardPassPro: 1, reward_pass_pro: 1, priorityPassPro: 1, upiTxnCount: 1, upi_txn_count: 1, Upi_Txn_Count: 1, withdrawAmount: 1, UPI_Amount: 1, upiAmount: 1, lead: 1, Lead: 1, teamLeadName: 1, yesterdaysStage3: 1, yesterday_s_stage_3: 1, _id: 0 } }
-          ).toArray()
+        ? db.collection(btCollectionName)
+            .find({})
+            .project({ merchantNumber: 1, stage3: 1, stage3Gap: 1, passLive: 1, pass_live: 1, Pass_Live: 1, rewardPassPro: 1, reward_pass_pro: 1, priorityPassPro: 1, upiTxnCount: 1, upi_txn_count: 1, Upi_Txn_Count: 1, withdrawAmount: 1, UPI_Amount: 1, upiAmount: 1, lead: 1, Lead: 1, teamLeadName: 1, yesterdaysStage3: 1, yesterday_s_stage_3: 1, _id: 0 })
+            .toArray()
         : Promise.resolve([])
     ]);
 
@@ -214,10 +216,11 @@ router.get('/merchants/all-details', async (req, res) => {
 
     // Enrich from TideBT Form Responses (latest per merchant)
     if (merchantNums.length > 0) {
-      const formDocs = await db.collection('TideBT Form Responses').find(
-        { merchantNumber: { $in: merchantNums } },
-        { projection: { merchantNumber: 1, createdAt: 1, merchantOpinion: 1, onboardingStatus: 1, merchantCategory: 1, _id: 0 } }
-      ).sort({ createdAt: -1 }).toArray();
+      const formDocs = await db.collection('TideBT Form Responses')
+        .find({ merchantNumber: { $in: merchantNums } })
+        .project({ merchantNumber: 1, createdAt: 1, merchantOpinion: 1, onboardingStatus: 1, merchantCategory: 1, _id: 0 })
+        .sort({ createdAt: -1 })
+        .toArray();
 
       formDocs.forEach(f => {
         const m = merchantMap[(f.merchantNumber||'').trim()];
