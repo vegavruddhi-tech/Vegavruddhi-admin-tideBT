@@ -54,6 +54,8 @@ const MONTH_ABBR = {
   'SEPTEMBER': 'SEP', 'OCTOBER': 'OCT', 'NOVEMBER': 'NOV', 'DECEMBER': 'DEC'
 };
 
+
+
 // Helper: find BT_TL_CONNECT collection — hardcoded canonical format "BT_TL_CONNECT [MONTH]"
 const findBTCollection = (allCollections, monthName, yearStr) => {
   if (!monthName) return null;
@@ -228,16 +230,6 @@ router.get('/usage-summary', async (req, res) => {
     const db = req.db;
     const { selectedYear, selectedMonth, dateFilter, fromDate, toDate } = req.query;
 
-    // ── Cache check — return instantly if already computed ─────────────────
-    const cacheKey = getCacheKey(req.query);
-    const cached = await readCache(db, cacheKey);
-    if (cached) {
-      console.log('⚡ Cache HIT:', cacheKey);
-      return res.json({ ...cached, fromCache: true });
-    }
-    console.log('🔄 Cache MISS — computing:', cacheKey);
-    // ──────────────────────────────────────────────────────────────────────
-
     const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
                     'July', 'August', 'September', 'October', 'November', 'December'];
     const now = new Date();
@@ -291,11 +283,12 @@ router.get('/usage-summary', async (req, res) => {
       });
     };
 
-    // ── Load raw data ──────────────────────────────────────────────────────
-    const allPayments      = await db.collection('TideBT_Payments').find({}).toArray();
+    // ── Load raw data simultaneously (Promise.all) ────────────────────────
+    const [allPayments, accessList] = await Promise.all([
+      db.collection('TideBT_Payments').find({}).toArray(),
+      db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray()
+    ]);
     const filteredPayments = filterByDate(allPayments, 'createdAt');
-
-    const accessList = await db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray();
 
     // ── Role classification — source of truth: transferToWhom field in payments ──
     //
@@ -400,22 +393,24 @@ router.get('/usage-summary', async (req, res) => {
     const rpCountMap    = {}; // fseName → count of merchants with rewardPassPro=Active
     const withdrawMap   = {}; // fseName → total withdraw amount from TideBT Form Responses
 
-    // Build numToFSE from bt_master + TideBT Form Responses
-    // Same sources as TL and FSE portals — no TideBT_Merchants (legacy)
-    const masterDocsAll = await db.collection('bt_master').find(
-      {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
-    ).toArray();
+    // Build numToFSE from bt_master + TideBT Form Responses (Parallel fetch)
+    const [masterDocsAll, formDocsAll, withdrawDataRaw] = await Promise.all([
+      db.collection('bt_master').find(
+        {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
+      ).toArray(),
+      db.collection('TideBT Form Responses').find(
+        { merchantNumber: { $exists: true, $ne: '' } },
+        { projection: { merchantNumber: 1, employeeName: 1, _id: 0 } }
+      ).toArray(),
+      db.collection('TideBT_Mobikwik').find({ formType: 'mobikwik-withdraw' }).toArray()
+    ]);
+
     const numToFSE = {};
     masterDocsAll.forEach(m => {
       const num = (m.merchantNumber || '').trim();
       const fse = (m.fseName || '').trim();
       if (num && fse) numToFSE[num] = fse;
     });
-    // Also include merchants from TideBT Form Responses (same as FSE portal)
-    const formDocsAll = await db.collection('TideBT Form Responses').find(
-      { merchantNumber: { $exists: true, $ne: '' } },
-      { projection: { merchantNumber: 1, employeeName: 1, _id: 0 } }
-    ).toArray();
     formDocsAll.forEach(m => {
       const num = (m.merchantNumber || '').trim();
       const fse = (m.employeeName  || '').trim();
@@ -448,10 +443,7 @@ router.get('/usage-summary', async (req, res) => {
     }
 
     // ── Load withdraw data from TideBT_Mobikwik, filtered by date ───
-    let withdrawData = await db.collection('TideBT_Mobikwik')
-      .find({ formType: 'mobikwik-withdraw' })
-      .toArray();
-    withdrawData = filterByDate(withdrawData, 'createdAt');
+    const withdrawData = filterByDate(withdrawDataRaw, 'createdAt');
     withdrawData.forEach(f => {
       const fseName = (f.employeeName || '').trim().toLowerCase(); // lowercase key
       if (!fseName) return;
@@ -671,10 +663,7 @@ router.get('/usage-summary', async (req, res) => {
         )
       : summary;
 
-    // ── Save to cache before responding ───────────────────────────────────
     const result = { success: true, summary: activeSummary, reportingPeriod };
-    await writeCache(db, cacheKey, result);
-
     res.json(result);
   } catch (error) {
     console.error('Error fetching usage summary:', error);

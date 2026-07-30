@@ -522,11 +522,10 @@ function App() {
               transition: "background-color 0.3s",
             }}
           >
-            {/* Keep all heavy pages mounted — use display:none to hide instead of unmounting */}
-            <Box sx={{ display: page === 'dashboard' ? 'block' : 'none' }}><Dashboard /></Box>
-            <Box sx={{ display: page === 'fse' ? 'block' : 'none' }}><FSEOverview /></Box>
-            <Box sx={{ display: page === 'tl' ? 'block' : 'none' }}><TLOverview /></Box>
-            <Box sx={{ display: page === 'fund-transfer' ? 'block' : 'none' }}><FundTransfer /></Box>
+            {page === "dashboard"     && <Dashboard />}
+            {page === "fse"           && <FSEOverview />}
+            {page === "tl"            && <TLOverview />}
+            {page === "fund-transfer" && <FundTransfer />}
             {page === "set-targets"    && <SetTargets />}
             {page === "bt-forms"       && <BTForms />}
             {page === "mobikwik-forms" && <MobikwikForms />}

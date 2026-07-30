@@ -64,21 +64,13 @@ router.get('/', async (req, res) => {
   }
 });
 
+
 // GET /api/fse/merchants/all - FSE summary + BT metrics (fast, no merchant details)
 router.get('/merchants/all', async (req, res) => {
   try {
     const db = req.db;
     const { selectedMonth, selectedYear } = req.query;
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    // Cache check
-    const ck = cacheKey('FSE_MERCHANTS_ALL', selectedMonth, selectedYear);
-    const cached = await cacheGet(db, ck);
-    if (cached) {
-      console.log(`[Cache HIT] ${ck}`);
-      return res.json(cached);
-    }
-    console.log(`[Cache MISS] ${ck}`);
 
     // Step 1: FSE names + TL mapping
     const accessList = await db.collection('TideBT_Access').find(
@@ -100,12 +92,18 @@ router.get('/merchants/all', async (req, res) => {
       {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
     ).toArray();
 
+    // Fast name normalization helper (O(1) hash map lookup instead of 500,000 regex matches)
+    const norm = name => (name || '').toLowerCase().replace(/\s*\d*$/, '').trim();
+    const fseLookupMap = {};
+    fseNames.forEach(n => { fseLookupMap[norm(n)] = n; });
+    const matchFSE = rawName => fseLookupMap[norm(rawName)];
+
     const fseMerchantNums = {};
     fseNames.forEach(n => { fseMerchantNums[n] = []; });
     masterDocs.forEach(m => {
       const num = (m.merchantNumber || '').trim();
       if (!num) return;
-      const matchedFSE = fseNames.find(n => new RegExp(`^\\s*${escape(n)}\\s*\\d*\\s*$`, 'i').test(m.fseName || ''));
+      const matchedFSE = matchFSE(m.fseName);
       if (matchedFSE) fseMerchantNums[matchedFSE].push(num);
     });
 
@@ -126,7 +124,7 @@ router.get('/merchants/all', async (req, res) => {
       btDocs.forEach(r => {
         const num = (r.merchantNumber || '').trim();
         const rawFse = numToFse[num];
-        const fseName = fseNames.find(n => new RegExp(`^\\s*${escape(n)}\\s*\\d*\\s*$`, 'i').test(rawFse || ''));
+        const fseName = matchFSE(rawFse);
         if (!fseName) return;
         if (!btMetrics[fseName]) btMetrics[fseName] = { totalBT: 0, btDone: 0, rpDone: 0, passLive: 0, yesterdayBT: 0 };
         const s3  = parseFloat(String(r.stage3 || '0').replace(/,/g,'')) || 0;
@@ -165,7 +163,6 @@ router.get('/merchants/all', async (req, res) => {
     }).filter(d => d.metrics.total > 0);
 
     const result = { success: true, data, btCollection: btCollectionName, collectionMonth };
-    await cacheSet(db, ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE merchants summary error:', err.message);
@@ -180,23 +177,22 @@ router.get('/merchants/all-details', async (req, res) => {
     const { selectedMonth, selectedYear } = req.query;
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    // Cache check
-    const ck = cacheKey('FSE_ALL_DETAILS', selectedMonth, selectedYear);
-    const cached = await cacheGet(db, ck);
-    if (cached) {
-      console.log(`[Cache HIT] ${ck}`);
-      return res.json(cached);
-    }
-    console.log(`[Cache MISS] ${ck}`);
-
     // BT collection — use helper that prefers canonical uppercase+space format
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
     const btCollectionName = findBTCollection(allCollections, selectedMonth, selectedYear);
 
-    // Get ALL merchants from bt_master in ONE query
-    const masterDocs = await db.collection('bt_master').find(
-      {}, { projection: { merchantNumber: 1, merchantName: 1, fseName: 1, tl: 1, _id: 0 } }
-    ).toArray();
+    // Parallel fetch: get ALL merchants from bt_master AND BT collection simultaneously!
+    const [masterDocs, btDocs] = await Promise.all([
+      db.collection('bt_master').find(
+        {}, { projection: { merchantNumber: 1, merchantName: 1, fseName: 1, tl: 1, _id: 0 } }
+      ).toArray(),
+      btCollectionName
+        ? db.collection(btCollectionName).find(
+            {},
+            { projection: { merchantNumber: 1, stage3: 1, stage3Gap: 1, passLive: 1, pass_live: 1, Pass_Live: 1, rewardPassPro: 1, reward_pass_pro: 1, priorityPassPro: 1, upiTxnCount: 1, upi_txn_count: 1, Upi_Txn_Count: 1, withdrawAmount: 1, UPI_Amount: 1, upiAmount: 1, lead: 1, Lead: 1, teamLeadName: 1, yesterdaysStage3: 1, yesterday_s_stage_3: 1, _id: 0 } }
+          ).toArray()
+        : Promise.resolve([])
+    ]);
 
     const merchantNums = masterDocs.map(m => (m.merchantNumber||'').trim()).filter(Boolean);
 
@@ -217,32 +213,28 @@ router.get('/merchants/all-details', async (req, res) => {
     });
 
     // Enrich from TideBT Form Responses (latest per merchant)
-    const formDocs = await db.collection('TideBT Form Responses').find(
-      { merchantNumber: { $in: merchantNums } },
-      { projection: { merchantNumber: 1, createdAt: 1, merchantOpinion: 1, onboardingStatus: 1, merchantCategory: 1, _id: 0 } }
-    ).sort({ createdAt: -1 }).toArray();
+    if (merchantNums.length > 0) {
+      const formDocs = await db.collection('TideBT Form Responses').find(
+        { merchantNumber: { $in: merchantNums } },
+        { projection: { merchantNumber: 1, createdAt: 1, merchantOpinion: 1, onboardingStatus: 1, merchantCategory: 1, _id: 0 } }
+      ).sort({ createdAt: -1 }).toArray();
 
-    formDocs.forEach(f => {
-      const m = merchantMap[(f.merchantNumber||'').trim()];
-      if (!m) return;
-      const d = f.createdAt ? new Date(f.createdAt) : null;
-      if (d && !isNaN(d) && (!m.lastActivity || d > new Date(m.lastActivity))) {
-        m.lastActivity = f.createdAt;
-        m.onboardingStatus = (f.onboardingStatus || f.merchantOpinion || '').trim() || 'Pending';
-        m.merchantCategory = (f.merchantCategory || '').trim();
-      }
-    });
+      formDocs.forEach(f => {
+        const m = merchantMap[(f.merchantNumber||'').trim()];
+        if (!m) return;
+        const d = f.createdAt ? new Date(f.createdAt) : null;
+        if (d && !isNaN(d) && (!m.lastActivity || d > new Date(m.lastActivity))) {
+          m.lastActivity = f.createdAt;
+          m.onboardingStatus = (f.onboardingStatus || f.merchantOpinion || '').trim() || 'Pending';
+          m.merchantCategory = (f.merchantCategory || '').trim();
+        }
+      });
+    }
 
     // Enrich from BT_TL_CONNECT
-    if (btCollectionName) {
+    if (btDocs.length > 0) {
       const parseNum = v => { const n = parseFloat(String(v||'0').replace(/,/g,'')); return isNaN(n)?0:n; };
       const getStr = (r, keys) => { for (const k of keys) { if (r[k]!==undefined&&r[k]!==null) return String(r[k]).trim(); } return '–'; };
-      // Fetch ALL docs from BT collection — not restricted to bt_master numbers
-      // This ensures merchants in the sheet but missing from bt_master are still counted
-      const btDocs = await db.collection(btCollectionName).find(
-        {},
-        { projection: { merchantNumber: 1, stage3: 1, stage3Gap: 1, passLive: 1, pass_live: 1, Pass_Live: 1, rewardPassPro: 1, reward_pass_pro: 1, priorityPassPro: 1, upiTxnCount: 1, upi_txn_count: 1, Upi_Txn_Count: 1, withdrawAmount: 1, UPI_Amount: 1, upiAmount: 1, lead: 1, Lead: 1, teamLeadName: 1, yesterdaysStage3: 1, yesterday_s_stage_3: 1, _id: 0 } }
-      ).toArray();
       btDocs.forEach(r => {
         const num = (r.merchantNumber || '').trim();
         if (!num) return;
@@ -295,7 +287,6 @@ router.get('/merchants/all-details', async (req, res) => {
       merchantCategory: m.merchantCategory
     }));
     const result = { success: true, merchants, btCollection: btCollectionName };
-    await cacheSet(db, ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE all-details error:', err.message);
@@ -310,15 +301,6 @@ router.get('/merchants/:fseName', async (req, res) => {
     const fseName = decodeURIComponent(req.params.fseName);
     const { selectedMonth, selectedYear } = req.query;
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    // Cache check — per FSE per month
-    const ck = cacheKey('FSE_MERCHANTS', fseName, selectedMonth, selectedYear);
-    const cached = await cacheGet(db, ck);
-    if (cached) {
-      console.log(`[Cache HIT] ${ck}`);
-      return res.json(cached);
-    }
-    console.log(`[Cache MISS] ${ck}`);
 
     // BT collection — use helper that prefers canonical uppercase+space format
     const allCollections = (await db.listCollections().toArray()).map(c => c.name);
@@ -406,7 +388,6 @@ router.get('/merchants/:fseName', async (req, res) => {
     });
 
     const result = { success: true, merchants };
-    await cacheSet(db, ck, result, 0); // permanent — busted on write
     res.json(result);
   } catch (err) {
     console.error('FSE merchants detail error:', err.message);

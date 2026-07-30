@@ -165,10 +165,6 @@ router.get('/:tlName/own-merchants', async (req, res) => {
     const { selectedMonth, selectedYear } = req.query;
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    const ck = cacheKey('TL_OWN_MERCHANTS', tlName, selectedMonth, selectedYear);
-    const cached = await cacheGet(db, ck);
-    if (cached) return res.json(cached);
-
     const btCollectionName = await findBTCollection(db, selectedMonth, selectedYear);
 
     const masterDocs = await db.collection('bt_master').find(
@@ -178,7 +174,6 @@ router.get('/:tlName/own-merchants', async (req, res) => {
 
     if (masterDocs.length === 0) {
       const r = { success: true, merchants: [] };
-      await cacheSet(db, ck, r, 0); // permanent
       return res.json(r);
     }
 
@@ -213,7 +208,6 @@ router.get('/:tlName/own-merchants', async (req, res) => {
 
     const merchants = Object.values(merchantMap).sort((a,b) => (b.stage3||0)-(a.stage3||0));
     const result = { success: true, merchants };
-    await cacheSet(db, ck, result, 0); // permanent — busted on sync/write
     res.json(result);
   } catch (err) {
     console.error('TL own-merchants error:', err.message);
@@ -228,10 +222,6 @@ router.get('/:tlName/team-merchants', async (req, res) => {
     const tlName = decodeURIComponent(req.params.tlName).trim();
     const { selectedMonth, selectedYear } = req.query;
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    const ck = cacheKey('TL_TEAM_MERCHANTS_V2', tlName, selectedMonth, selectedYear);
-    const cached = await cacheGet(db, ck);
-    if (cached) return res.json(cached);
 
     const btCollectionName = await findBTCollection(db, selectedMonth, selectedYear);
 
@@ -251,7 +241,6 @@ router.get('/:tlName/team-merchants', async (req, res) => {
 
     if (fseNames.length === 0) {
       const r = { success: true, merchants: [] };
-      await cacheSet(db, ck, r, 0); // permanent
       return res.json(r);
     }
 
@@ -297,7 +286,6 @@ router.get('/:tlName/team-merchants', async (req, res) => {
 
     const merchants = Object.values(merchantMap).sort((a,b) => (b.stage3||0)-(a.stage3||0));
     const result = { success: true, merchants };
-    await cacheSet(db, ck, result, 0); // permanent — busted on sync/write
     res.json(result);
   } catch (err) {
     console.error('TL team-merchants error:', err.message);
