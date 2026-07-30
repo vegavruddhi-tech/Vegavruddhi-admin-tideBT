@@ -137,10 +137,10 @@ async function enrichWithBT(db, merchantMap, btCollectionName) {
   if (nums.length === 0) return;
   const parseNum = v => { const n = parseFloat(String(v||'0').replace(/,/g,'')); return isNaN(n)?0:n; };
   const getStr  = (r,keys) => { for (const k of keys) { if (r[k]!==undefined&&r[k]!==null) return String(r[k]).trim(); } return '–'; };
-  const btDocs = await db.collection(btCollectionName).find(
-    { merchantNumber: { $in: nums } },
-    { projection: { merchantNumber:1, stage3:1, stage3Gap:1, passLive:1, pass_live:1, Pass_Live:1, rewardPassPro:1, reward_pass_pro:1, priorityPassPro:1, upiTxnCount:1, upi_txn_count:1, _id:0 } }
-  ).toArray();
+  const btDocs = await db.collection(btCollectionName)
+    .find({ merchantNumber: { $in: nums } })
+    .project({ merchantNumber:1, stage3:1, stage3Gap:1, passLive:1, pass_live:1, Pass_Live:1, rewardPassPro:1, reward_pass_pro:1, priorityPassPro:1, upiTxnCount:1, upi_txn_count:1, _id:0 })
+    .toArray();
   btDocs.forEach(r => {
     const m = merchantMap[(r.merchantNumber||'').trim()];
     if (!m) return;
@@ -167,10 +167,10 @@ router.get('/:tlName/own-merchants', async (req, res) => {
 
     const btCollectionName = await findBTCollection(db, selectedMonth, selectedYear);
 
-    const masterDocs = await db.collection('bt_master').find(
-      { fseName: { $regex: new RegExp(`^\\s*${escape(tlName)}\\s*\\d*\\s*$`, 'i') } },
-      { projection: { merchantNumber:1, merchantName:1, fseName:1, tl:1, _id:0 } }
-    ).toArray();
+    const masterDocs = await db.collection('bt_master')
+      .find({ fseName: { $regex: new RegExp(`^\\s*${escape(tlName)}\\s*\\d*\\s*$`, 'i') } })
+      .project({ merchantNumber: 1, merchantName: 1, fseName: 1, tl: 1, _id: 0 })
+      .toArray();
 
     if (masterDocs.length === 0) {
       const r = { success: true, merchants: [] };
@@ -189,10 +189,10 @@ router.get('/:tlName/own-merchants', async (req, res) => {
 
     // Enrich from forms
     const nums = Object.keys(merchantMap);
-    const formDocs = await db.collection('TideBT Form Responses').find(
-      { merchantNumber: { $in: nums } },
-      { projection: { merchantNumber:1, createdAt:1, onboardingStatus:1, merchantOpinion:1, merchantCategory:1, _id:0 } }
-    ).sort({ createdAt: -1 }).toArray();
+    const formDocs = await db.collection('TideBT Form Responses')
+      .find({ merchantNumber: { $in: nums } })
+      .project({ merchantNumber: 1, createdAt: 1, onboardingStatus: 1, merchantOpinion: 1, merchantCategory: 1, _id: 0 })
+      .toArray();
     formDocs.forEach(f => {
       const m = merchantMap[(f.merchantNumber||'').trim()];
       if (!m) return;
@@ -226,16 +226,22 @@ router.get('/:tlName/team-merchants', async (req, res) => {
     const btCollectionName = await findBTCollection(db, selectedMonth, selectedYear);
 
     // Get FSE names under this TL
-    let accessRecs = await db.collection('TideBT_Access').find({
-      tlName: { $regex: new RegExp(`^\\s*${escape(tlName)}\\s*$`, 'i') },
-      hasTideBTAccess: true
-    }, { projection: { fseName:1, fseEmail:1, _id:0 } }).toArray();
+    let accessRecs = await db.collection('TideBT_Access')
+      .find({
+        tlName: { $regex: new RegExp(`^\\s*${escape(tlName)}\\s*$`, 'i') },
+        hasTideBTAccess: true
+      })
+      .project({ fseName: 1, fseEmail: 1, _id: 0 })
+      .toArray();
     if (accessRecs.length === 0) {
       const fw = tlName.split(' ')[0];
-      accessRecs = await db.collection('TideBT_Access').find({
-        tlName: { $regex: new RegExp(`^\\s*${escape(fw)}\\s*$`, 'i') },
-        hasTideBTAccess: true
-      }, { projection: { fseName:1, fseEmail:1, _id:0 } }).toArray();
+      accessRecs = await db.collection('TideBT_Access')
+        .find({
+          tlName: { $regex: new RegExp(`^\\s*${escape(fw)}\\s*$`, 'i') },
+          hasTideBTAccess: true
+        })
+        .project({ fseName: 1, fseEmail: 1, _id: 0 })
+        .toArray();
     }
     const fseNames = [...new Set(accessRecs.map(r => r.fseName).filter(Boolean))];
 
@@ -244,15 +250,20 @@ router.get('/:tlName/team-merchants', async (req, res) => {
       return res.json(r);
     }
 
-    const masterDocs = await db.collection('bt_master').find(
-      {
-        $or: accessRecs.map(r => ({
-          fseName: { $regex: new RegExp(`^\\s*${escape(r.fseName || '')}\\s*\\d*\\s*$`, 'i') },
-          tl:      { $regex: new RegExp(`^\\s*${escape(tlName)}\\s*\\d*\\s*$`, 'i') }
-        }))
-      },
-      { projection: { merchantNumber:1, merchantName:1, fseName:1, tl:1, _id:0 } }
-    ).toArray();
+    const fseConditions = [];
+    accessRecs.forEach(r => {
+      if (r.fseName) {
+        fseConditions.push({ fseName: { $regex: new RegExp(`^\\s*${escape(r.fseName)}\\s*\\d*\\s*$`, 'i') } });
+      }
+      if (r.fseEmail) {
+        fseConditions.push({ fseEmail: { $regex: new RegExp(`^${escape(r.fseEmail)}$`, 'i') } });
+      }
+    });
+
+    const masterDocs = await db.collection('bt_master')
+      .find(fseConditions.length > 0 ? { $or: fseConditions } : {})
+      .project({ merchantNumber: 1, merchantName: 1, fseName: 1, fseEmail: 1, tl: 1, _id: 0 })
+      .toArray();
 
     const merchantMap = {};
     masterDocs.forEach(m => {
@@ -267,10 +278,10 @@ router.get('/:tlName/team-merchants', async (req, res) => {
 
     const nums = Object.keys(merchantMap);
     if (nums.length > 0) {
-      const formDocs = await db.collection('TideBT Form Responses').find(
-        { merchantNumber: { $in: nums } },
-        { projection: { merchantNumber:1, createdAt:1, onboardingStatus:1, merchantOpinion:1, merchantCategory:1, _id:0 } }
-      ).sort({ createdAt: -1 }).toArray();
+      const formDocs = await db.collection('TideBT Form Responses')
+        .find({ merchantNumber: { $in: nums } })
+        .project({ merchantNumber: 1, createdAt: 1, onboardingStatus: 1, merchantOpinion: 1, merchantCategory: 1, _id: 0 })
+        .toArray();
       formDocs.forEach(f => {
         const m = merchantMap[(f.merchantNumber||'').trim()];
         if (!m) return;

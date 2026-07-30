@@ -17,6 +17,7 @@ import StorefrontIcon from '@mui/icons-material/Storefront'; // eslint-disable-l
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import DateFilter from '../components/DateFilter';
 import axios from 'axios';
+import { getOverviewCache, setOverviewCache } from '../utils/overviewCache';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
@@ -278,29 +279,59 @@ export default function FSEOverview() {
     }
   };
 
-  const fetchMerchantData = useCallback(async () => {
+  // Per-FSE merchant details — loaded on expand
+  const [fseMerchants, setFseMerchants] = useState({}); // { fseName: merchants[] }
+  const [loadingFSE, setLoadingFSE] = useState({}); // { fseName: bool }
+  const [allMerchantsLoading, setAllMerchantsLoading] = useState(false);
+  const [allMerchantsData, setAllMerchantsData] = useState([]); // flat array of all merchants
+
+  const fetchMerchantData = useCallback(async (forceRefresh = false) => {
+    const cacheKey = `FSE_${selectedMonth || 'ALL'}_${selectedYear || 'ALL'}`;
+    if (!forceRefresh) {
+      const cached = getOverviewCache(cacheKey);
+      if (cached) {
+        setMerchantData(cached.merchantData);
+        setAllMerchantsData(cached.allMerchantsData);
+        setBtMonth(cached.btMonth);
+        return;
+      }
+    }
+
     setMerchantLoading(true);
+    setAllMerchantsLoading(true);
     try {
       const params = new URLSearchParams();
       if (selectedMonth) params.set('selectedMonth', selectedMonth);
       if (selectedYear) params.set('selectedYear', selectedYear);
-      const res = await axios.get(`${API_URL}/fse/merchants/all?${params}`);
-      setMerchantData(res.data.data || []);
-      if (res.data.collectionMonth) setBtMonth(res.data.collectionMonth);
-      else setBtMonth(selectedMonth || '');
+
+      const [summaryRes, detailsRes] = await Promise.all([
+        axios.get(`${API_URL}/fse/merchants/all?${params}`),
+        axios.get(`${API_URL}/fse/merchants/all-details?${params}`)
+      ]);
+
+      const mData = summaryRes.data.data || [];
+      const mDetails = detailsRes.data.merchants || [];
+      const monthStr = summaryRes.data.collectionMonth || selectedMonth || '';
+
+      setMerchantData(mData);
+      setAllMerchantsData(mDetails);
+      setBtMonth(monthStr);
+
+      setOverviewCache(cacheKey, { merchantData: mData, allMerchantsData: mDetails, btMonth: monthStr });
     } catch (err) {
       console.error('Error fetching merchant data:', err);
     } finally {
       setMerchantLoading(false);
+      setAllMerchantsLoading(false);
     }
   }, [selectedMonth, selectedYear]);
 
-  // Per-FSE merchant details — loaded on expand
-  const [fseMerchants, setFseMerchants] = useState({}); // { fseName: merchants[] }
-  const [loadingFSE, setLoadingFSE] = useState({}); // { fseName: bool }
+  const loadAllFSEMerchants = useCallback(async (forceRefresh = false) => {
+    if (allMerchantsData.length > 0 && !forceRefresh) return;
+    await fetchMerchantData(forceRefresh);
+  }, [allMerchantsData.length, fetchMerchantData]);
 
   const fetchFSEMerchants = useCallback(async (fseName) => {
-    // Only skip if we have actual data — empty array means may need retry
     if (fseMerchants[fseName] && fseMerchants[fseName].length > 0) return;
     setLoadingFSE(p => ({ ...p, [fseName]: true }));
     try {
@@ -316,26 +347,6 @@ export default function FSEOverview() {
     }
   }, [selectedMonth, selectedYear, fseMerchants]);
 
-  // Load all merchants for KPI drill-down — uses single fast endpoint
-  const [allMerchantsLoading, setAllMerchantsLoading] = useState(false);
-  const [allMerchantsData, setAllMerchantsData] = useState([]); // flat array of all merchants
-
-  const loadAllFSEMerchants = useCallback(async () => {
-    setAllMerchantsLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (selectedMonth) params.set('selectedMonth', selectedMonth);
-      if (selectedYear) params.set('selectedYear', selectedYear);
-      const res = await axios.get(`${API_URL}/fse/merchants/all-details?${params}`);
-      const merchants = res.data.merchants || [];
-      setAllMerchantsData(merchants);
-    } catch (err) {
-      console.error('Error fetching all merchants:', err);
-    } finally {
-      setAllMerchantsLoading(false);
-    }
-  }, [selectedMonth, selectedYear]);
-
   const handleExpandFSE = (fseName) => {
     if (expandedFSE === fseName) {
       setExpandedFSE(null);
@@ -345,36 +356,14 @@ export default function FSEOverview() {
     }
   };
 
-  // Reset FSE merchants cache when month/year changes
   useEffect(() => {
     setFseMerchants({});
     setExpandedFSE(null);
     setKpiDialog(null);
-    setAllMerchantsData([]); // reset all-details cache
-    // Immediately re-fetch merchant summary if in merchants view
     if (viewMode === 'merchants') {
       fetchMerchantData();
     }
-  }, [selectedMonth, selectedYear]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (viewMode === 'merchants') fetchMerchantData();
-    else setExpandedFSE(null);
-  }, [viewMode, fetchMerchantData]);
-
-  // Auto-load allMerchantsData when merchantData is available
-  useEffect(() => {
-    if (merchantData.length > 0 && !allMerchantsLoading) {
-      loadAllFSEMerchants();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [merchantData]);
-
-  // Auto-load all merchants when KPI dialog opens
-  useEffect(() => {
-    if (kpiDialog) loadAllFSEMerchants();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kpiDialog]);
+  }, [selectedMonth, selectedYear, viewMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fmtExcelDate = (val) => {
     if (!val || val === '–' || val === '-' || val === '0' || val === 0) return '–';

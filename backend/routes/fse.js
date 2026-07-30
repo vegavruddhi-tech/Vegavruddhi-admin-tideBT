@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { cacheGet, cacheSet, cacheKey, cacheInvalidate } = require('../utils/cache');
+const { cacheGet, cacheSet, cacheKey } = require('../utils/cache');
 
 // Helper: find BT_TL_CONNECT collection — hardcoded canonical format "BT_TL_CONNECT [MONTH]"
 // e.g. selectedMonth="July" → looks for "BT_TL_CONNECT JULY" first.
@@ -70,6 +70,10 @@ router.get('/merchants/all', async (req, res) => {
   try {
     const db = req.db;
     const { selectedMonth, selectedYear } = req.query;
+    const ck = cacheKey('FSE_SUMMARY', selectedMonth || 'ALL', selectedYear || 'ALL');
+    const cached = await cacheGet(ck);
+    if (cached) return res.json(cached);
+
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     // Step 1: FSE names + TL mapping
@@ -164,6 +168,7 @@ router.get('/merchants/all', async (req, res) => {
     }).filter(d => d.metrics.total > 0);
 
     const result = { success: true, data, btCollection: btCollectionName, collectionMonth };
+    await cacheSet(ck, result, 86400);
     res.json(result);
   } catch (err) {
     console.error('FSE merchants summary error:', err.message);
@@ -176,6 +181,10 @@ router.get('/merchants/all-details', async (req, res) => {
   try {
     const db = req.db;
     const { selectedMonth, selectedYear } = req.query;
+    const ck = cacheKey('FSE_ALL_DETAILS', selectedMonth || 'ALL', selectedYear || 'ALL');
+    const cached = await cacheGet(ck);
+    if (cached) return res.json(cached);
+
     const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     // BT collection — use helper that prefers canonical uppercase+space format
@@ -217,9 +226,8 @@ router.get('/merchants/all-details', async (req, res) => {
     // Enrich from TideBT Form Responses (latest per merchant)
     if (merchantNums.length > 0) {
       const formDocs = await db.collection('TideBT Form Responses')
-        .find({ merchantNumber: { $in: merchantNums } })
+        .find({})
         .project({ merchantNumber: 1, createdAt: 1, merchantOpinion: 1, onboardingStatus: 1, merchantCategory: 1, _id: 0 })
-        .sort({ createdAt: -1 })
         .toArray();
 
       formDocs.forEach(f => {
@@ -290,6 +298,7 @@ router.get('/merchants/all-details', async (req, res) => {
       merchantCategory: m.merchantCategory
     }));
     const result = { success: true, merchants, btCollection: btCollectionName };
+    await cacheSet(ck, result, 86400);
     res.json(result);
   } catch (err) {
     console.error('FSE all-details error:', err.message);

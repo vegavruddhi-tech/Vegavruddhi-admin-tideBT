@@ -1,18 +1,20 @@
 const express = require('express');
 const router = express.Router();
+const { cacheGet, cacheSet, cacheKey } = require('../utils/cache');
 
 // GET /api/forms - Get all Tide BT forms
 router.get('/', async (req, res) => {
   try {
     const db = req.db; // Use ConnectionManager db from middleware
     const { page = 1, limit = 50, employee, status, formType, fse, tl } = req.query;
-    
-    // Route to correct collection based on formType
-    // Mobikwik withdraw forms are in 'TideBT_Mobikwik' collection (synced from Google Sheet)
-    // Regular BT onboarding forms are in 'TideBT Form Responses'
+
     const collectionName = formType === 'mobikwik-withdraw'
       ? 'TideBT_Mobikwik'
       : 'TideBT Form Responses';
+
+    const ck = cacheKey('FORMS', collectionName, page, limit, employee || '', status || '', formType || '', fse || '', tl || '');
+    const cached = await cacheGet(ck);
+    if (cached) return res.json(cached);
     
     // Build query
     const query = {};
@@ -101,13 +103,15 @@ router.get('/', async (req, res) => {
       }
     }
     
-    res.json({ 
+    const result = { 
       success: true, 
       forms: enrichedForms, 
       total,
       page: parseInt(page),
       pages: Math.ceil(total / limit)
-    });
+    };
+    await cacheSet(ck, result, 86400);
+    res.json(result);
   } catch (error) {
     console.error('Error fetching forms:', error);
     res.status(500).json({ success: false, error: error.message });

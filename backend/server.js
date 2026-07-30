@@ -40,7 +40,8 @@ async function connectDB() {
           db.collection('TideBT_Payments').createIndex({ transferTo: 1 }),
           db.collection('TideBT_Payments').createIndex({ senderName: 1 }),
           db.collection('TideBT_Access').createIndex({ tlName: 1 }),
-          db.collection('TideBT_Access').createIndex({ fseName: 1 })
+          db.collection('TideBT_Access').createIndex({ fseName: 1 }),
+          db.collection('TideBT Form Responses').createIndex({ merchantNumber: 1 })
         ]);
         const cols = (await db.listCollections().toArray()).map(c => c.name);
         const btCols = cols.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));

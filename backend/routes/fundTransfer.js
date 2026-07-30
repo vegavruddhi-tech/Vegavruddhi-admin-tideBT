@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const { cacheGet, cacheSet, cacheKey, cacheInvalidatePattern } = require('../utils/cache');
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
-                'July', 'August', 'September', 'October', 'November', 'December'];
+  'July', 'August', 'September', 'October', 'November', 'December'];
 
 // ── Permanent Cache (invalidate-on-write) ──────────────────────────────────
 // Cache lives forever. Cleared only when a payment is added/updated/deleted.
@@ -59,10 +60,10 @@ const MONTH_ABBR = {
 // Helper: find BT_TL_CONNECT collection — hardcoded canonical format "BT_TL_CONNECT [MONTH]"
 const findBTCollection = (allCollections, monthName, yearStr) => {
   if (!monthName) return null;
-  const mu   = monthName.toUpperCase();
+  const mu = monthName.toUpperCase();
   const MONTH_ABBR2 = {
-    'JANUARY':'JAN','FEBRUARY':'FEB','MARCH':'MAR','APRIL':'APR','MAY':'MAY','JUNE':'JUN',
-    'JULY':'JUL','AUGUST':'AUG','SEPTEMBER':'SEP','OCTOBER':'OCT','NOVEMBER':'NOV','DECEMBER':'DEC'
+    'JANUARY': 'JAN', 'FEBRUARY': 'FEB', 'MARCH': 'MAR', 'APRIL': 'APR', 'MAY': 'MAY', 'JUNE': 'JUN',
+    'JULY': 'JUL', 'AUGUST': 'AUG', 'SEPTEMBER': 'SEP', 'OCTOBER': 'OCT', 'NOVEMBER': 'NOV', 'DECEMBER': 'DEC'
   };
   const abbr = MONTH_ABBR2[mu] || mu;
 
@@ -87,12 +88,12 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
   if (curMonthIdx <= 0) return {}; // January — no prior months
 
   const pastMonths = MONTHS.slice(0, curMonthIdx); // e.g. for June → [Jan,Feb,Mar,Apr,May]
-  const allNums    = Object.keys(numToFSE);
+  const allNums = Object.keys(numToFSE);
 
   // ── Step 1: Find unique BT collections for all past months ───────────────
   // Multiple months can share the same collection — deduplicate to avoid repeat queries
   const colForMonth = {}; // monthName → collectionName | null
-  const uniqueCols  = new Set();
+  const uniqueCols = new Set();
   pastMonths.forEach(m => {
     const col = findBTCollection(allCollections, m, String(curYear));
     colForMonth[m] = col;
@@ -103,10 +104,10 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
   const colDataMap = {}; // collectionName → { [merchantNumber]: { stage3, rp } }
   if (allNums.length > 0) {
     await Promise.all([...uniqueCols].map(async col => {
-      const docs = await db.collection(col)
-        .find({ merchantNumber: { $in: allNums } })
-        .project({ merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1 })
-        .toArray();
+      const docs = await db.collection(col).find(
+        { merchantNumber: { $in: allNums } },
+        { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1 } }
+      ).toArray();
       const lookup = {};
       docs.forEach(r => {
         const num = (r.merchantNumber || '').trim();
@@ -131,10 +132,10 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
     const monthName = MONTHS[d.getMonth()];
     if (!monthPayments[monthName]) return;
 
-    const receiver = (p.transferTo     || '').trim().toLowerCase();
-    const sender   = (p.senderName     || '').trim().toLowerCase();
-    const whom     = (p.transferToWhom || '').trim();
-    const amount   = p.amount || 0;
+    const receiver = (p.transferTo || '').trim().toLowerCase();
+    const sender = (p.senderName || '').trim().toLowerCase();
+    const whom = (p.transferToWhom || '').trim();
+    const amount = p.amount || 0;
 
     // Received: negative amounts (returns) always count regardless of whom type —
     // admins often enter wrong transferToWhom when recording a fund return.
@@ -145,8 +146,8 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
         // Always count returns — wrong whom type is common
         monthPayments[monthName].received[receiver] = (monthPayments[monthName].received[receiver] || 0) + amount;
       } else if ((isTLReceiver && whom === "TL's & Managers") ||
-                 (!isTLReceiver && whom === "FSE Ground Team") ||
-                 !whom) {
+        (!isTLReceiver && whom === "FSE Ground Team") ||
+        !whom) {
         monthPayments[monthName].received[receiver] = (monthPayments[monthName].received[receiver] || 0) + amount;
       }
     }
@@ -156,8 +157,8 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
     // Skip: VV/Admin sender, self-transfers
     // The isTLMap check ensures only TL senders are tracked here
     if (sender && sender !== 'admin' && sender !== 'accountant' && sender !== 'vv' &&
-        receiver && receiver !== sender &&
-        isTLMap[sender] === true) {
+      receiver && receiver !== sender &&
+      isTLMap[sender] === true) {
       // Count all outgoing by TL senders (includes FSE distribution + sub-TL distribution)
       monthPayments[monthName].sent[sender] = (monthPayments[monthName].sent[sender] || 0) + amount;
     }
@@ -167,13 +168,13 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
   const carryMap = {};
 
   pastMonths.forEach(monthName => {
-    const col     = colForMonth[monthName];
-    const lookup  = col ? (colDataMap[col] || {}) : {};
+    const col = colForMonth[monthName];
+    const lookup = col ? (colDataMap[col] || {}) : {};
 
     // Build BT/RP per fseName for this month
     const monthBTMap = {}, monthRPMap = {};
     allNums.forEach(num => {
-      const entry   = lookup[num];
+      const entry = lookup[num];
       if (!entry) return;
       const fseName = (numToFSE[num] || '').toLowerCase();
       if (!fseName) return;
@@ -185,20 +186,20 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
     const allNames = new Set([...Object.keys(monthReceivedMap), ...Object.keys(monthSentMap), ...Object.keys(monthBTMap)]);
 
     allNames.forEach(nameLower => {
-      const received   = monthReceivedMap[nameLower] || 0;
-      const usedBT     = monthBTMap[nameLower] || 0;
-      const rpCount    = monthRPMap[nameLower] || 0;
-      const usedRP     = rpCount * 2500;
-      const fee        = Math.round((usedBT > 10000 ? usedBT * 0.015 : 0) * 100) / 100;
-      const isTL       = isTLMap[nameLower] === true;
+      const received = monthReceivedMap[nameLower] || 0;
+      const usedBT = monthBTMap[nameLower] || 0;
+      const rpCount = monthRPMap[nameLower] || 0;
+      const usedRP = rpCount * 2500;
+      const fee = Math.round((usedBT > 10000 ? usedBT * 0.015 : 0) * 100) / 100;
+      const isTL = isTLMap[nameLower] === true;
       const sentToFSEs = isTL ? (monthSentMap[nameLower] || 0) : 0;
 
       // Net = received - sent to FSEs - BT/RP costs
       // For TL: net = received - distributed_to_FSEs - personal_BT_costs
       // Running balance accumulates across months (can go negative then recover)
       const netThisMonth = received - sentToFSEs - usedRP - fee;
-      const prevBalance  = carryMap[nameLower] || 0;
-      const newBalance   = prevBalance + netThisMonth;
+      const prevBalance = carryMap[nameLower] || 0;
+      const newBalance = prevBalance + netThisMonth;
 
       // Only carry positive balance — negative means TL is in "debt" which clears when they receive more
       carryMap[nameLower] = Math.max(0, newBalance);
@@ -212,12 +213,19 @@ const computeCarryForward = async (db, allCollections, allPayments, numToFSE, is
 router.get('/', async (req, res) => {
   try {
     const db = req.db;
+    const ck = cacheKey('ALL_TRANSFERS');
+    const cached = await cacheGet(ck);
+    if (cached) return res.json(cached);
+
     const transfers = await db.collection('TideBT_Payments')
       .find({})
+      .project({ _id: 1, transferTo: 1, senderName: 1, transferToWhom: 1, amount: 1, createdAt: 1, paymentDoneOn: 1, notes: 1, utrNo: 1, mode: 1 })
       .sort({ createdAt: -1 })
       .toArray();
 
-    res.json({ success: true, transfers });
+    const result = { success: true, transfers };
+    await cacheSet(ck, result, 86400);
+    res.json(result);
   } catch (error) {
     console.error('Error fetching fund transfers:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -230,8 +238,12 @@ router.get('/usage-summary', async (req, res) => {
     const db = req.db;
     const { selectedYear, selectedMonth, dateFilter, fromDate, toDate } = req.query;
 
+    const ck = cacheKey('USAGE_SUMMARY', selectedMonth || 'ALL', selectedYear || 'ALL', dateFilter || 'ALL', fromDate || '', toDate || '');
+    const cached = await cacheGet(ck);
+    if (cached) return res.json(cached);
+
     const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December'];
+      'July', 'August', 'September', 'October', 'November', 'December'];
     const now = new Date();
 
     // ── Reporting period label ─────────────────────────────────────────────
@@ -257,15 +269,15 @@ router.get('/usage-summary', async (req, res) => {
 
     const filterByDate = (items, dateField = 'createdAt') => {
       if (!isFilterActive) return items;
-      const today      = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
       return items.filter(item => {
         if (!item[dateField]) return false;
         const d = new Date(item[dateField]);
         if (isNaN(d.getTime())) return false;
-        if (dateFilter === 'today')  return d >= today && d < new Date(today.getTime() + 86400000);
-        if (dateFilter === 'month')  return d >= monthStart && d <= monthEnd;
+        if (dateFilter === 'today') return d >= today && d < new Date(today.getTime() + 86400000);
+        if (dateFilter === 'month') return d >= monthStart && d <= monthEnd;
         if (dateFilter === 'custom') {
           if (fromDate) {
             const from = new Date(fromDate);
@@ -277,30 +289,16 @@ router.get('/usage-summary', async (req, res) => {
           }
           return true;
         }
-        if (selectedYear  && d.getFullYear() !== parseInt(selectedYear)) return false;
+        if (selectedYear && d.getFullYear() !== parseInt(selectedYear)) return false;
         if (selectedMonth && MONTHS[d.getMonth()] !== selectedMonth) return false;
         return true;
       });
     };
 
     // ── Load raw data simultaneously (Promise.all) ────────────────────────
-    const paymentQuery = {};
-    if (selectedYear && !selectedMonth && (!dateFilter || dateFilter === 'all')) {
-      const yr = parseInt(selectedYear);
-      if (!isNaN(yr)) {
-        paymentQuery.createdAt = { $gte: new Date(yr, 0, 1), $lte: new Date(yr, 11, 31, 23, 59, 59, 999) };
-      }
-    }
-
     const [allPayments, accessList] = await Promise.all([
-      db.collection('TideBT_Payments')
-        .find(paymentQuery)
-        .project({ transferTo: 1, senderName: 1, transferToWhom: 1, amount: 1, createdAt: 1, source: 1, paymentDoneOn: 1 })
-        .toArray(),
-      db.collection('TideBT_Access')
-        .find({ hasTideBTAccess: true })
-        .project({ fseName: 1, tlName: 1, fseEmail: 1, tlEmail: 1 })
-        .toArray()
+      db.collection('TideBT_Payments').find({}).toArray(),
+      db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray()
     ]);
     const filteredPayments = filterByDate(allPayments, 'createdAt');
 
@@ -315,7 +313,7 @@ router.get('/usage-summary', async (req, res) => {
     // TideBT_Access.fseName is used as tiebreaker: if name is in fseName → always FSE.
 
     const fseNameSet = new Set(accessList.map(a => (a.fseName || '').trim()).filter(Boolean));
-    const tlNameSet  = new Set(accessList.map(a => (a.tlName  || '').trim()).filter(Boolean));
+    const tlNameSet = new Set(accessList.map(a => (a.tlName || '').trim()).filter(Boolean));
 
     const nameRoleMap = {};
 
@@ -324,8 +322,8 @@ router.get('/usage-summary', async (req, res) => {
     // (admins sometimes enter wrong type, self-transfers create false FSE classification)
     // transferToWhom is only used for names NOT in TideBT_Access at all
     filteredPayments.forEach(p => {
-      const n     = (p.transferTo    || '').trim();
-      const whom  = (p.transferToWhom || '').trim();
+      const n = (p.transferTo || '').trim();
+      const whom = (p.transferToWhom || '').trim();
       if (!n || !whom) return;
 
       // Skip if already classified by TideBT_Access (will be set in Step 2)
@@ -365,7 +363,7 @@ router.get('/usage-summary', async (req, res) => {
     const distributors = new Set(
       allPayments
         .filter(p => {
-          const sender   = (p.senderName || '').trim();
+          const sender = (p.senderName || '').trim();
           const receiver = (p.transferTo || '').trim();
           return sender && receiver && sender !== receiver && !ADMIN_SENDERS.has(sender.toLowerCase());
         })
@@ -381,7 +379,7 @@ router.get('/usage-summary', async (req, res) => {
     // Step 3: Remove names with no activity in selected period
     if (isFilterActive) {
       const filteredReceiverNames = new Set(filteredPayments.map(p => (p.transferTo || '').trim()).filter(Boolean));
-      const filteredSenderNames   = new Set(filteredPayments.map(p => (p.senderName || '').trim()).filter(Boolean));
+      const filteredSenderNames = new Set(filteredPayments.map(p => (p.senderName || '').trim()).filter(Boolean));
       Object.keys(nameRoleMap).forEach(name => {
         // Keep if received OR sent payments in period
         if (!filteredReceiverNames.has(name) && !filteredSenderNames.has(name)) {
@@ -403,24 +401,20 @@ router.get('/usage-summary', async (req, res) => {
       : null;
     // If no month selected — don't fall back to latest, show ₹0
 
-    const btAmountMap   = {}; // fseName → total stage3 BT done
-    const rpCountMap    = {}; // fseName → count of merchants with rewardPassPro=Active
-    const withdrawMap   = {}; // fseName → total withdraw amount from TideBT Form Responses
+    const btAmountMap = {}; // fseName → total stage3 BT done
+    const rpCountMap = {}; // fseName → count of merchants with rewardPassPro=Active
+    const withdrawMap = {}; // fseName → total withdraw amount from TideBT Form Responses
 
     // Build numToFSE from bt_master + TideBT Form Responses (Parallel fetch)
     const [masterDocsAll, formDocsAll, withdrawDataRaw] = await Promise.all([
-      db.collection('bt_master')
-        .find({})
-        .project({ merchantNumber: 1, fseName: 1, _id: 0 })
-        .toArray(),
-      db.collection('TideBT Form Responses')
-        .find({ merchantNumber: { $exists: true, $ne: '' } })
-        .project({ merchantNumber: 1, employeeName: 1, _id: 0 })
-        .toArray(),
-      db.collection('TideBT_Mobikwik')
-        .find({ formType: 'mobikwik-withdraw' })
-        .project({ amount: 1, employeeName: 1, fseName: 1, createdAt: 1, date: 1, _id: 0 })
-        .toArray()
+      db.collection('bt_master').find(
+        {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
+      ).toArray(),
+      db.collection('TideBT Form Responses').find(
+        { merchantNumber: { $exists: true, $ne: '' } },
+        { projection: { merchantNumber: 1, employeeName: 1, _id: 0 } }
+      ).toArray(),
+      db.collection('TideBT_Mobikwik').find({ formType: 'mobikwik-withdraw' }).toArray()
     ]);
 
     const numToFSE = {};
@@ -431,7 +425,7 @@ router.get('/usage-summary', async (req, res) => {
     });
     formDocsAll.forEach(m => {
       const num = (m.merchantNumber || '').trim();
-      const fse = (m.employeeName  || '').trim();
+      const fse = (m.employeeName || '').trim();
       if (num && fse && !numToFSE[num]) numToFSE[num] = fse;
     });
 
@@ -440,19 +434,19 @@ router.get('/usage-summary', async (req, res) => {
 
       // Get BT data from BT_TL_CONNECT — only for known merchant numbers
       const btDocs = allMerchantNums.length > 0
-        ? await db.collection(btCollectionName)
-            .find({ merchantNumber: { $in: allMerchantNums } })
-            .project({ merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1, _id: 0 })
-            .toArray()
+        ? await db.collection(btCollectionName).find(
+          { merchantNumber: { $in: allMerchantNums } },
+          { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1, _id: 0 } }
+        ).toArray()
         : [];
 
       btDocs.forEach(r => {
-        const num     = (r.merchantNumber || '').trim();
+        const num = (r.merchantNumber || '').trim();
         const fseName = numToFSE[num];
         if (!fseName) return;
         const stage3Raw = r.stage3 || r.Stage_3 || r['Stage-3'] || '0';
         const stage3 = parseFloat(String(stage3Raw).replace(/,/g, '')) || 0;
-        const rpPro  = (r.rewardPassPro || r.Reward_Pass_Pro || r.priorityPassPro || '').toLowerCase() === 'active';
+        const rpPro = (r.rewardPassPro || r.Reward_Pass_Pro || r.priorityPassPro || '').toLowerCase() === 'active';
         // Store with lowercase key for case-insensitive lookup
         const key = fseName.toLowerCase();
         btAmountMap[key] = (btAmountMap[key] || 0) + stage3;
@@ -476,11 +470,11 @@ router.get('/usage-summary', async (req, res) => {
     // These are kept separate so:
     //   Fund Left = carryForward + received - deductions - BT/RP costs
     // NOT: received = net (positive + negative) which makes received go negative
-    const receivedMap   = {};
-    const deductionMap  = {}; // stores absolute value of negatives
+    const receivedMap = {};
+    const deductionMap = {}; // stores absolute value of negatives
     filteredPayments.forEach(p => {
-      const n      = (p.transferTo    || '').trim();
-      const whom   = (p.transferToWhom || '').trim();
+      const n = (p.transferTo || '').trim();
+      const whom = (p.transferToWhom || '').trim();
       const amount = p.amount || 0;
       if (!n || !whom) return;
       const role = nameRoleMap[n];
@@ -496,7 +490,7 @@ router.get('/usage-summary', async (req, res) => {
         // TL must only count "TL's & Managers" type payments
         // This prevents double-counting when a name appears in both payment types
         if ((role === "TL's & Managers" && whom === "TL's & Managers") ||
-            (role === "FSE Ground Team"  && whom === "FSE Ground Team")) {
+          (role === "FSE Ground Team" && whom === "FSE Ground Team")) {
           receivedMap[n] = (receivedMap[n] || 0) + amount;
         }
       }
@@ -506,13 +500,13 @@ router.get('/usage-summary', async (req, res) => {
     // Negative (minus fund / recovery) entries are EXCLUDED from sentMap.
     // They go into recoveryMap (TL credited back) instead.
     // This keeps "Sent to FSC" unchanged when a minus fund is submitted.
-    const sentMap    = {};
+    const sentMap = {};
     const recoveryMap = {}; // TL gets credited when they recover fund from FSC
 
     filteredPayments.forEach(p => {
-      const sender   = (p.senderName  || '').trim();
-      const receiver = (p.transferTo  || '').trim();
-      const amount   = p.amount || 0;
+      const sender = (p.senderName || '').trim();
+      const receiver = (p.transferTo || '').trim();
+      const amount = p.amount || 0;
       if (!sender || !receiver) return;
       // Skip VV/Admin originating payments
       if (['Admin', 'Accountant', 'VV', 'admin', 'accountant', 'vv'].includes(sender)) return;
@@ -547,7 +541,7 @@ router.get('/usage-summary', async (req, res) => {
     }
     // Add from payment behavior — anyone who sent fund to someone else is acting as a TL/distributor
     allPayments.forEach(p => {
-      const sender   = (p.senderName || '').trim().toLowerCase();
+      const sender = (p.senderName || '').trim().toLowerCase();
       const receiver = (p.transferTo || '').trim().toLowerCase();
       if (!sender || !receiver || sender === receiver) return;
       if (SKIP_SENDERS.has(sender)) return;
@@ -582,7 +576,7 @@ router.get('/usage-summary', async (req, res) => {
     // Data is synced for July 2026 (carry forward from June).
     // Only show carry forward for July — all other months show 0.
     const OPENING_BALANCE_MONTH = 'July';
-    const OPENING_BALANCE_YEAR  = 2026;
+    const OPENING_BALANCE_YEAR = 2026;
 
     if (selectedMonth === OPENING_BALANCE_MONTH && parseInt(selectedYear) === OPENING_BALANCE_YEAR) {
       const openingBalances = await db.collection('TideBT_OpeningBalances').find({}).toArray();
@@ -617,27 +611,27 @@ router.get('/usage-summary', async (req, res) => {
 
     // ── Calculate usage per person ─────────────────────────────────────────
     const summary = names.map(name => {
-      const isTL      = nameRoleMap[name] === "TL's & Managers";
+      const isTL = nameRoleMap[name] === "TL's & Managers";
       const nameLower = name.toLowerCase().trim();
 
       // BT amount and RP count from BT_TL_CONNECT via bt_master (case-insensitive lookup)
-      const usedBT  = btAmountMap[nameLower] || 0;
-      const rpCount = rpCountMap[nameLower]  || 0;
-      const usedRP  = rpCount * 2500;
-      const btFee   = Math.round((usedBT > 10000 ? usedBT * 0.015 : 0) * 100) / 100;
+      const usedBT = btAmountMap[nameLower] || 0;
+      const rpCount = rpCountMap[nameLower] || 0;
+      const usedRP = rpCount * 2500;
+      const btFee = Math.round((usedBT > 10000 ? usedBT * 0.015 : 0) * 100) / 100;
 
       // Mobikwik withdrawals — case-insensitive lookup
       const withdrawAmount = withdrawMap[nameLower] || 0;
-      const withdrawFee    = Math.round(withdrawAmount * 0.03 * 100) / 100;
+      const withdrawFee = Math.round(withdrawAmount * 0.03 * 100) / 100;
 
       // received = positive payments only
       // deduction = absolute value of negative payments (fund returns/recoveries) — FSC side
       // recovery = minus fund recovered BY this TL FROM FSC — TL side credit
-      const received    = receivedMap[name]  || 0;
-      const deduction   = deductionMap[name] || 0;
-      const recovery    = isTL ? (recoveryMap[name] || 0) : 0;
-      const sentToFSEs  = isTL ? (sentMap[name] || 0) : 0;
-      const carryFwd    = carryMap[nameLower] || 0;
+      const received = receivedMap[name] || 0;
+      const deduction = deductionMap[name] || 0;
+      const recovery = isTL ? (recoveryMap[name] || 0) : 0;
+      const sentToFSEs = isTL ? (sentMap[name] || 0) : 0;
+      const carryFwd = carryMap[nameLower] || 0;
 
       // totalAvailable = carryForward + received + recovered (minus fund credited back)
       // For TL: subtract what they sent to FSEs (only positive sent, not recoveries)
@@ -646,7 +640,7 @@ router.get('/usage-summary', async (req, res) => {
 
       // Fund Left = totalAvailable - deductions (FSC side) - BT/RP costs
       const totalUsed = usedRP + btFee + withdrawFee;
-      const fundLeft  = totalAvailable - deduction - totalUsed;
+      const fundLeft = totalAvailable - deduction - totalUsed;
 
       return {
         name,
@@ -672,16 +666,17 @@ router.get('/usage-summary', async (req, res) => {
     // Include if: received anything, OR sent anything, OR has carry-forward, OR has BT/RP
     const activeSummary = isFilterActive
       ? summary.filter(item =>
-          item.received !== 0 ||
-          item.sentToFSEs > 0 ||
-          item.carryForward > 0 ||
-          item.usedBT > 0 ||
-          item.rpCount > 0 ||
-          item.withdrawAmount > 0
-        )
+        item.received !== 0 ||
+        item.sentToFSEs > 0 ||
+        item.carryForward > 0 ||
+        item.usedBT > 0 ||
+        item.rpCount > 0 ||
+        item.withdrawAmount > 0
+      )
       : summary;
 
     const result = { success: true, summary: activeSummary, reportingPeriod };
+    await cacheSet(ck, result, 86400);
     res.json(result);
   } catch (error) {
     console.error('Error fetching usage summary:', error);
@@ -694,6 +689,7 @@ router.post('/', async (req, res) => {
   try {
     const db = req.db;
     console.log('📝 Fund transfer POST received:', req.body);
+    await cacheInvalidatePattern('tidebt:USAGE_SUMMARY:*');
     const { transferToWhom, senderName, transferTo, amount, paymentDoneOn, paymentDate } = req.body;
 
     if (!transferToWhom || !senderName || !transferTo || !amount || !paymentDoneOn) {
@@ -740,22 +736,22 @@ router.get('/export-excel', async (req, res) => {
     const { selectedYear, selectedMonth, dateFilter, fromDate, toDate } = req.query;
 
     const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December'];
+      'July', 'August', 'September', 'October', 'November', 'December'];
     const now = new Date();
 
     const isFilterActive = !!(dateFilter && dateFilter !== 'all') || !!selectedYear || !!selectedMonth;
 
     const filterByDate = (items, dateField = 'createdAt') => {
       if (!isFilterActive) return items;
-      const today      = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
       return items.filter(item => {
         if (!item[dateField]) return false;
         const d = new Date(item[dateField]);
         if (isNaN(d.getTime())) return false;
-        if (dateFilter === 'today')  return d >= today && d < new Date(today.getTime() + 86400000);
-        if (dateFilter === 'month')  return d >= monthStart && d <= monthEnd;
+        if (dateFilter === 'today') return d >= today && d < new Date(today.getTime() + 86400000);
+        if (dateFilter === 'month') return d >= monthStart && d <= monthEnd;
         if (dateFilter === 'custom') {
           if (fromDate) {
             const from = new Date(fromDate);
@@ -767,7 +763,7 @@ router.get('/export-excel', async (req, res) => {
           }
           return true;
         }
-        if (selectedYear  && d.getFullYear() !== parseInt(selectedYear)) return false;
+        if (selectedYear && d.getFullYear() !== parseInt(selectedYear)) return false;
         if (selectedMonth && MONTHS[d.getMonth()] !== selectedMonth) return false;
         return true;
       });
@@ -920,10 +916,10 @@ router.put('/:id', async (req, res) => {
 
     const updateFields = { updatedAt: new Date() };
     if (transferToWhom !== undefined) updateFields.transferToWhom = transferToWhom;
-    if (senderName     !== undefined) updateFields.senderName     = senderName;
-    if (transferTo     !== undefined) updateFields.transferTo     = transferTo;
-    if (amount         !== undefined) updateFields.amount         = parseFloat(amount);
-    if (paymentDoneOn  !== undefined) updateFields.paymentDoneOn  = paymentDoneOn;
+    if (senderName !== undefined) updateFields.senderName = senderName;
+    if (transferTo !== undefined) updateFields.transferTo = transferTo;
+    if (amount !== undefined) updateFields.amount = parseFloat(amount);
+    if (paymentDoneOn !== undefined) updateFields.paymentDoneOn = paymentDoneOn;
     if (paymentDate) {
       // Store as noon IST to avoid timezone shifting
       const d = new Date(paymentDate + 'T06:30:00.000Z'); // 06:30 UTC = 12:00 IST

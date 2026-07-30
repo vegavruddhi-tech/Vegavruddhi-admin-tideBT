@@ -13,3 +13,13 @@ root.render(
     </GoogleOAuthProvider>
   </React.StrictMode>
 );
+
+// Register Service Worker for 50ms-120ms API + asset caching matching reference panel
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/service-worker.js')
+      .then((reg) => console.log('✅ ServiceWorker registered:', reg.scope))
+      .catch((err) => console.warn('⚠️ ServiceWorker registration failed:', err));
+  });
+}

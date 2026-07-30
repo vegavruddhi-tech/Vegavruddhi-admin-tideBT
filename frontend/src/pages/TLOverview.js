@@ -13,6 +13,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DateFilter from '../components/DateFilter';
 import axios from 'axios';
+import { getOverviewCache, setOverviewCache } from '../utils/overviewCache';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 
@@ -1001,15 +1002,24 @@ export default function TLOverview() {
     }
   };
 
-  const fetchAllMerchants = async () => {
-    // all-details is too large for localStorage — fetch fresh each time
+  const fetchAllMerchants = async (forceRefresh = false) => {
+    const cacheKey = `TL_${selectedMonth || 'ALL'}_${selectedYear || 'ALL'}`;
+    if (!forceRefresh) {
+      const cached = getOverviewCache(cacheKey);
+      if (cached) {
+        setAllMerchantsData(cached.allMerchantsData);
+        return;
+      }
+    }
     setMerchantsLoading(true);
     try {
       const params = new URLSearchParams();
       if (selectedMonth) params.set('selectedMonth', selectedMonth);
       if (selectedYear) params.set('selectedYear', selectedYear);
       const res = await axios.get(`${API_URL}/fse/merchants/all-details?${params}`);
-      setAllMerchantsData(res.data.merchants || []);
+      const merchants = res.data.merchants || [];
+      setAllMerchantsData(merchants);
+      setOverviewCache(cacheKey, { allMerchantsData: merchants });
     } catch (err) {
       console.error('Error fetching all merchants:', err);
     } finally {
