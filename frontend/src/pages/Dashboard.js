@@ -55,20 +55,8 @@ function getEmpCode(fseName) {
 }
 
 function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth, selectedYear }) {
-  const [expandedTl, setExpandedTl] = useState(null);
   const [expandedFse, setExpandedFse] = useState(null);
   const [drillSearch, setDrillSearch] = useState('');
-
-  // Reset FSE expansion if TL collapses/changes
-  const handleTlClick = (tlName) => {
-    if (expandedTl === tlName) {
-      setExpandedTl(null);
-      setExpandedFse(null);
-    } else {
-      setExpandedTl(tlName);
-      setExpandedFse(null);
-    }
-  };
 
   const filteredMerchants = useMemo(() => {
     if (!drillSearch) return kpiDrillData;
@@ -97,80 +85,45 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
     return claims;
   }, [rewardPassData, selectedMonth, selectedYear]);
 
-  const hierarchy = useMemo(() => {
-    const tls = {};
+  // Direct FSE-wise grouping (No TL nesting, ultra-fast performance)
+  const fseList = useMemo(() => {
+    const map = {};
     filteredMerchants.forEach(m => {
-      const tlName = m.tlName || m.tl || 'Unassigned TL';
       const fseName = m.fseName || 'Unassigned FSE';
-
-      if (!tls[tlName]) {
-        tls[tlName] = {
-          name: tlName,
-          merchants: [],
-          fses: {}
-        };
-      }
-
-      tls[tlName].merchants.push(m);
-
-      if (!tls[tlName].fses[fseName]) {
-        tls[tlName].fses[fseName] = {
+      if (!map[fseName]) {
+        map[fseName] = {
           name: fseName,
+          tlName: m.tlName || m.tl || '',
           merchants: []
         };
       }
-      tls[tlName].fses[fseName].merchants.push(m);
+      map[fseName].merchants.push(m);
     });
 
-    return Object.values(tls).map(tl => {
-      const fseList = Object.values(tl.fses).map(fse => {
-        const fseBT = fse.merchants.reduce((sum, m) => sum + (
-          kpiType === 'kpi-yesterday-bt' ? (m.yesterdaysStage3 || 0) : (m.stage3 || 0) + (m.upiAmount || 0)
-        ), 0);
-        const fseRPActive = fse.merchants.filter(m => (m.rewardPassPro || '').toLowerCase() === 'active').length;
-        const fseRPPending = fse.merchants.filter(m => (m.stage3 || 0) >= 10000 && (m.rewardPassPro || '').toLowerCase() !== 'active').length;
-        const fsePassLive = fse.merchants.filter(m => (m.passLive || '').toLowerCase() === 'live').length;
-        const fsePendingBT = fse.merchants.filter(m => (m.stage3 || 0) === 0).length;
-
-        return {
-          name: fse.name,
-          employeeCode: getEmpCode(fse.name),
-          merchants: fse.merchants,
-          merchantCount: fse.merchants.length,
-          btAmount: fseBT,
-          rpPurchasedCount: fseClaims[fse.name] || 0,
-          rpActiveCount: fseRPActive,
-          rpPendingCount: fseRPPending,
-          passLiveCount: fsePassLive,
-          pendingBtCount: fsePendingBT
-        };
-      });
-
-      const tlBT = tl.merchants.reduce((sum, m) => sum + (m.stage3 || 0) + (m.upiAmount || 0), 0);
-      const tlRPActive = tl.merchants.filter(m => (m.rewardPassPro || '').toLowerCase() === 'active').length;
-      const tlRPPending = tl.merchants.filter(m => (m.stage3 || 0) >= 10000 && (m.rewardPassPro || '').toLowerCase() !== 'active').length;
-      const tlPassLive = tl.merchants.filter(m => (m.passLive || '').toLowerCase() === 'live').length;
-      const tlPendingBT = tl.merchants.filter(m => (m.stage3 || 0) === 0).length;
-      const tlRPPurchased = fseList.reduce((sum, f) => sum + f.rpPurchasedCount, 0);
+    return Object.values(map).map(fse => {
+      const fseBT = fse.merchants.reduce((sum, m) => sum + (
+        kpiType === 'kpi-yesterday-bt' ? (m.yesterdaysStage3 || 0) : (m.stage3 || 0) + (m.upiAmount || 0)
+      ), 0);
+      const fseRPActive = fse.merchants.filter(m => (m.rewardPassPro || '').toLowerCase() === 'active').length;
+      const fseRPPending = fse.merchants.filter(m => (m.stage3 || 0) >= 10000 && (m.rewardPassPro || '').toLowerCase() !== 'active').length;
+      const fsePassLive = fse.merchants.filter(m => (m.passLive || '').toLowerCase() === 'live').length;
+      const fsePendingBT = fse.merchants.filter(m => (m.stage3 || 0) === 0).length;
 
       return {
-        name: tl.name,
-        fses: fseList,
-        merchants: tl.merchants,
-        fseCount: fseList.length,
-        merchantCount: tl.merchants.length,
-        btAmount: tlBT,
-        rpPurchasedCount: tlRPPurchased,
-        rpActiveCount: tlRPActive,
-        rpPendingCount: tlRPPending,
-        passLiveCount: tlPassLive,
-        pendingBtCount: tlPendingBT
+        name: fse.name,
+        tlName: fse.tlName,
+        employeeCode: getEmpCode(fse.name),
+        merchants: fse.merchants,
+        merchantCount: fse.merchants.length,
+        btAmount: fseBT,
+        rpPurchasedCount: fseClaims[fse.name] || 0,
+        rpActiveCount: fseRPActive,
+        rpPendingCount: fseRPPending,
+        passLiveCount: fsePassLive,
+        pendingBtCount: fsePendingBT
       };
-    }).sort((a, b) => b.btAmount - a.btAmount);
-  }, [filteredMerchants, fseClaims]);
-
-  const tlCount = hierarchy.length;
-  const totalMerchantsCount = filteredMerchants.length;
+    }).sort((a, b) => b.merchantCount - a.merchantCount);
+  }, [filteredMerchants, fseClaims, kpiType]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', maxHeight: '70vh', overflow: 'hidden' }}>
@@ -179,7 +132,7 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
         <TextField
           fullWidth
           size="small"
-          placeholder="Search by Merchant Name, Mobile, FSE, or TL..."
+          placeholder="Search by FSE Name, Merchant Name, Mobile, or TL..."
           value={drillSearch}
           onChange={(e) => setDrillSearch(e.target.value)}
           InputProps={{
@@ -197,157 +150,149 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
         />
       </Box>
 
-      {/* Dynamic Breadcrumbs */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 3, py: 1.5, bgcolor: '#f4fbf7', borderBottom: '1px solid #e2ece7', flexWrap: 'wrap' }}>
-        <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5, mr: 0.5 }}>
-          Path:
-        </Typography>
-        <Button
-          size="small"
-          onClick={() => { setExpandedTl(null); setExpandedFse(null); }}
-          sx={{
-            textTransform: 'none',
-            fontWeight: !expandedTl ? 700 : 500,
-            color: !expandedTl ? '#1a5c38' : 'text.secondary',
-            minWidth: 0,
-            p: 0,
-            fontSize: '0.8rem',
-            '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
-          }}
-        >
-          All TLs
-        </Button>
-        {expandedTl && (
-          <>
-            <Typography variant="caption" color="text.secondary">➔</Typography>
-            <Button
-              size="small"
-              onClick={() => setExpandedFse(null)}
-              sx={{
-                textTransform: 'none',
-                fontWeight: !expandedFse ? 700 : 500,
-                color: !expandedFse ? '#1a5c38' : 'text.secondary',
-                minWidth: 0,
-                p: 0,
-                fontSize: '0.8rem',
-                '&:hover': { bgcolor: 'transparent', textDecoration: 'underline' }
-              }}
-            >
-              TL: {expandedTl}
-            </Button>
-          </>
-        )}
-        {expandedFse && (
-          <>
-            <Typography variant="caption" color="text.secondary">➔</Typography>
-            <Typography variant="caption" fontWeight={700} color="#1a5c38" sx={{ fontSize: '0.8rem' }}>
-              FSE: {expandedFse}
-            </Typography>
-          </>
-        )}
-      </Box>
-
       {/* Info Badge */}
-      <Box sx={{ px: 3, py: 1, bgcolor: '#fffbeb', borderBottom: '1px solid #fef3c7' }}>
-        <Typography variant="caption" sx={{ display: 'flex', alignItems: 'center', gap: 0.5, fontWeight: 500, color: '#b45309' }}>
-          💡 Totals are derived from active merchant records. Click any row to expand its details.
+      <Box sx={{ px: 3, py: 1, bgcolor: '#f0fdf4', borderBottom: '1px solid #dcfce7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography variant="caption" fontWeight={600} color="#166534">
+          👥 Total FSEs: <strong>{fseList.length}</strong> | Total Merchants: <strong>{filteredMerchants.length.toLocaleString()}</strong>
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Click any FSE to view their merchants list
         </Typography>
       </Box>
 
-      {/* Scrollable Hierarchy Content */}
+      {/* Scrollable FSE-wise List */}
       <Box sx={{ flex: 1, overflowY: 'auto', p: 0 }}>
-        {hierarchy.length === 0 ? (
+        {fseList.length === 0 ? (
           <Box sx={{ p: 4, textAlign: 'center' }}>
-            <Typography color="text.secondary">No matching records found.</Typography>
+            <Typography color="text.secondary">No matching FSE records found.</Typography>
           </Box>
         ) : (
-          hierarchy.map(tl => {
-            const isTlExpanded = expandedTl === tl.name;
+          fseList.map(fse => {
+            const isExpanded = expandedFse === fse.name;
             return (
-              <Box key={tl.name} sx={{ borderBottom: '1px solid #e2ece7', bgcolor: '#fff' }}>
-                {/* Level 1: TL Header Card */}
+              <Box key={fse.name} sx={{ borderBottom: '1px solid #e2ece7', bgcolor: '#fff' }}>
+                {/* FSE Row Header */}
                 <Box
-                  onClick={() => handleTlClick(tl.name)}
+                  onClick={() => setExpandedFse(isExpanded ? null : fse.name)}
                   sx={{
                     px: 3,
                     py: 2,
-                    bgcolor: isTlExpanded ? '#e8f5e9' : '#fff',
+                    bgcolor: isExpanded ? '#f0fdf4' : '#fff',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    transition: 'all 0.2s',
-                    borderLeft: isTlExpanded ? '4px solid #1a5c38' : '4px solid transparent',
-                    '&:hover': { bgcolor: '#f1f8f3' }
+                    transition: 'all 0.15s ease',
+                    borderLeft: isExpanded ? '4px solid #2e7d32' : '4px solid transparent',
+                    '&:hover': { bgcolor: '#f9fafb' }
                   }}
                 >
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Avatar sx={{ bgcolor: '#1a5c38', width: 36, height: 36, fontSize: 13, fontWeight: 700 }}>
-                      {initials(tl.name)}
+                    <Avatar sx={{ bgcolor: '#2e7d32', width: 36, height: 36, fontSize: 13, fontWeight: 700 }}>
+                      {initials(fse.name)}
                     </Avatar>
                     <Box>
-                      <Typography variant="subtitle2" fontWeight={800} color="#1a5c38">
-                        TL: {tl.name}
+                      <Typography variant="subtitle2" fontWeight={800} color="#1b4332">
+                        FSE: {fse.name} <Typography component="span" variant="caption" color="text.secondary">({fse.employeeCode})</Typography>
                       </Typography>
-                      <Box sx={{ display: 'flex', gap: 1.5, mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary">
-                          FSEs: <strong>{tl.fseCount}</strong>
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Merchants: <strong>{tl.merchantCount}</strong>
+                      <Box sx={{ display: 'flex', gap: 1.5, mt: 0.2 }}>
+                        {fse.tlName && (
+                          <Typography variant="caption" color="text.secondary">
+                            TL: <strong>{fse.tlName}</strong>
+                          </Typography>
+                        )}
+                        <Typography variant="caption" color="#2e7d32" fontWeight={700}>
+                          Merchants: <strong>{fse.merchantCount}</strong>
                         </Typography>
                       </Box>
                     </Box>
                   </Box>
+
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                     <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-                      {kpiType === 'kpi-bt-completed' && <Chip label={`BT: ₹${tl.btAmount.toLocaleString()}`} size="small" sx={{ bgcolor: '#fff3e0', color: '#e65100', fontWeight: 700, fontSize: 10 }} />}
-                      {kpiType === 'kpi-rp-purchased' && <Chip label={`RP Purchased: ${tl.rpPurchasedCount}`} size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700, fontSize: 10 }} />}
-                      {kpiType === 'kpi-rp-active' && <Chip label={`RP Active: ${tl.rpActiveCount}`} size="small" sx={{ bgcolor: '#ede9fe', color: '#7c3aed', fontWeight: 700, fontSize: 10 }} />}
-                      {kpiType === 'kpi-rp-pending' && <Chip label={`RP Pending: ${tl.rpPendingCount}`} size="small" sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: 10 }} />}
-                      {kpiType === 'kpi-pass-live' && <Chip label={`Pass Live: ${tl.passLiveCount}`} size="small" sx={{ bgcolor: '#d8f3dc', color: '#1a4731', fontWeight: 700, fontSize: 10 }} />}
-                      {kpiType === 'kpi-pending-bt' && <Chip label={`Pending BT: ${tl.pendingBtCount}`} size="small" sx={{ bgcolor: '#ffe4e6', color: '#be123c', fontWeight: 700, fontSize: 10 }} />}
+                      {kpiType === 'kpi-pending-bt' && (
+                        <Chip label={`Pending BT: ${fse.pendingBtCount}`} size="small" sx={{ bgcolor: '#ffe4e6', color: '#be123c', fontWeight: 700, fontSize: 11 }} />
+                      )}
+                      {kpiType === 'kpi-bt-completed' && (
+                        <Chip label={`BT: ₹${fse.btAmount.toLocaleString()}`} size="small" sx={{ bgcolor: '#fff3e0', color: '#e65100', fontWeight: 700, fontSize: 11 }} />
+                      )}
+                      {kpiType === 'kpi-rp-purchased' && (
+                        <Chip label={`RP Purchased: ${fse.rpPurchasedCount}`} size="small" sx={{ bgcolor: '#e0f2fe', color: '#0369a1', fontWeight: 700, fontSize: 11 }} />
+                      )}
+                      {kpiType === 'kpi-rp-active' && (
+                        <Chip label={`RP Active: ${fse.rpActiveCount}`} size="small" sx={{ bgcolor: '#ede9fe', color: '#7c3aed', fontWeight: 700, fontSize: 11 }} />
+                      )}
+                      {kpiType === 'kpi-rp-pending' && (
+                        <Chip label={`RP Pending: ${fse.rpPendingCount}`} size="small" sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: 11 }} />
+                      )}
+                      {kpiType === 'kpi-pass-live' && (
+                        <Chip label={`Pass Live: ${fse.passLiveCount}`} size="small" sx={{ bgcolor: '#d8f3dc', color: '#1a4731', fontWeight: 700, fontSize: 11 }} />
+                      )}
                       {['kpi-total-merchants', 'kpi-active-fse'].includes(kpiType) && (
-                        <>
-                          <Chip label={`BT: ₹${tl.btAmount.toLocaleString()}`} size="small" sx={{ bgcolor: '#fff3e0', color: '#e65100', fontWeight: 700, fontSize: 10 }} />
-                          <Chip label={`RP Act: ${tl.rpActiveCount}`} size="small" sx={{ bgcolor: '#ede9fe', color: '#7c3aed', fontWeight: 700, fontSize: 10 }} />
-                        </>
+                        <Chip label={`Total: ${fse.merchantCount}`} size="small" sx={{ bgcolor: '#e2ece7', color: '#1b4332', fontWeight: 700, fontSize: 11 }} />
                       )}
                     </Box>
-                    {isTlExpanded ? <ExpandLessIcon sx={{ color: '#1a5c38' }} /> : <ExpandMoreIcon sx={{ color: '#1a5c38' }} />}
+                    {isExpanded ? <ExpandLessIcon sx={{ color: '#2e7d32' }} /> : <ExpandMoreIcon sx={{ color: '#2e7d32' }} />}
                   </Box>
                 </Box>
 
-                {/* Level 2: FSE Cards inside TL */}
-                <Collapse in={isTlExpanded}>
-                  <Box sx={{ bgcolor: '#f9fafb', p: 2, pl: 4, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                    {tl.fses.length === 0 ? (
-                      <Typography variant="caption" color="text.secondary">No FSEs under this TL.</Typography>
-                    ) : (
-                      tl.fses.map(fse => {
-                        const isFseExpanded = expandedFse === fse.name;
-                        return (
-                          <Box key={fse.name} sx={{ border: '1.5px solid #e2ece7', borderRadius: 2, bgcolor: '#fff', overflow: 'hidden' }}>
-                            <Box
-                              onClick={() => setExpandedFse(isFseExpanded ? null : fse.name)}
-                              sx={{
-                                px: 2,
-                                py: 1.5,
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                bgcolor: isFseExpanded ? '#f0fdf4' : '#fff',
-                                '&:hover': { bgcolor: '#f9fafb' }
-                              }}
-                            >
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                                <Avatar sx={{ bgcolor: '#2e7d32', width: 28, height: 28, fontSize: 11, fontWeight: 700 }}>
-                                  {initials(fse.name)}
-                                </Avatar>
-                                <Box>
-                                  <Typography variant="body2" fontWeight={700} color="#2e7d32">
-                                    FSE: {fse.name}
+                {/* Expanded FSE Merchant List Table */}
+                <Collapse in={isExpanded} unmountOnExit>
+                  <Box sx={{ p: 2, bgcolor: '#f9fafb' }}>
+                    <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: '#e8f5e9' }}>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>#</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>Merchant Name</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>Mobile</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>Onboarding Date</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>Stage 3 BT Amount</TableCell>
+                            <TableCell sx={{ fontWeight: 700, fontSize: 11 }}>RP Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {fse.merchants.slice(0, 100).map((m, idx) => (
+                            <TableRow key={m._id || idx} hover>
+                              <TableCell sx={{ fontSize: 11 }}>{idx + 1}</TableCell>
+                              <TableCell sx={{ fontWeight: 600, fontSize: 11 }}>{m.merchantName || 'N/A'}</TableCell>
+                              <TableCell sx={{ fontSize: 11 }}>{m.merchantNumber || 'N/A'}</TableCell>
+                              <TableCell sx={{ fontSize: 11 }}>{m.dateOfWorking ? new Date(m.dateOfWorking).toLocaleDateString('en-IN') : (m.onboardingDate || 'N/A')}</TableCell>
+                              <TableCell sx={{ fontWeight: 700, color: (m.stage3 || 0) > 0 ? '#1b4332' : '#be123c', fontSize: 11 }}>
+                                ₹{(m.stage3 || 0).toLocaleString()}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: 11 }}>
+                                <Chip
+                                  label={m.rewardPassPro || 'Pending'}
+                                  size="small"
+                                  sx={{
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    bgcolor: (m.rewardPassPro || '').toLowerCase() === 'active' ? '#ede9fe' : '#fff3e0',
+                                    color: (m.rewardPassPro || '').toLowerCase() === 'active' ? '#7c3aed' : '#e65100'
+                                  }}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                    {fse.merchants.length > 100 && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
+                        Showing first 100 of {fse.merchants.length} merchants for performance
+                      </Typography>
+                    )}
+                  </Box>
+                </Collapse>
+              </Box>
+            );
+          })
+        )}
+      </Box>
+    </Box>
+  );
+}
                                   </Typography>
                                   <Typography variant="caption" color="text.secondary">
                                     Emp Code: <strong>{fse.employeeCode}</strong> · {fse.merchantCount} merchants
