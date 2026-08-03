@@ -40,15 +40,9 @@ const plain = n => n > 0 ? `&#8377;${Math.round(n).toLocaleString('en-IN')}` : '
 const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function sendTideBTDailyReport(db) {
-  try {
-    // 🛑 Daily email reports paused for a few days as requested by user
-    const PAUSED = true;
-    if (PAUSED || process.env.PAUSE_DAILY_REPORTS === 'true') {
-      console.log('⏸️ [BT Report] Daily email report is PAUSED for a few days.');
-      return { success: true, message: 'Daily FTD/MTD email report is currently paused.' };
-    }
-
-    console.log('[BT Report] Generating TideBT FTD + MTD Report...');
+  // Daily FTD & MTD report emails temporarily disabled per user request
+  console.log('[BT Report] 🛑 Daily FTD/MTD report emails are temporarily disabled.');
+  return { success: true, message: 'FTD & MTD daily report emails are temporarily disabled.' };
 
     const now         = new Date();
     const istOffset   = 5.5 * 60 * 60 * 1000;
