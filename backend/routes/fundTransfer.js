@@ -215,7 +215,7 @@ router.get('/', async (req, res) => {
     const db = req.db;
     const ck = cacheKey('ALL_TRANSFERS');
     const cached = await cacheGet(ck);
-    if (cached) return res.json(cached);
+    if (cached && cached.transfers && cached.transfers.length > 0) return res.json(cached);
 
     const transfers = await db.collection('TideBT_Payments')
       .find({})

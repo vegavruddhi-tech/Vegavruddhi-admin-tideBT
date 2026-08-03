@@ -14,7 +14,7 @@ router.get('/', async (req, res) => {
 
     const ck = cacheKey('FORMS', collectionName, page, limit, employee || '', status || '', formType || '', fse || '', tl || '');
     const cached = await cacheGet(ck);
-    if (cached) return res.json(cached);
+    if (cached && cached.forms && cached.forms.length > 0) return res.json(cached);
     
     // Build query
     const query = {};
