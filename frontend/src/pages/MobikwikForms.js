@@ -126,14 +126,14 @@ export default function MobikwikForms() {
 
     const excelData = filteredForms.map((f, idx) => ({
       'S.No': idx + 1,
-      'Customer Name': f.customerName || 'N/A',
-      'Phone Number': f.customerPhone || f.phoneNumber || 'N/A',
-      'Employee Name': f.employeeName || f.fse || 'N/A',
-      'TL Name': f.tl || 'N/A',
+      'Customer Name': f.merchantName || f.customerName || f.name || '-',
+      'Phone Number': f.merchantNumber || f.customerNumber || f.phone || f.phoneNumber || '-',
+      'Employee Name': f.fse || f.employeeName || f.fseName || '-',
+      'TL Name': f.tl || f.tlName || '-',
       'Withdraw Amount (₹)': f.withdrawAmount || 0,
       'Withdraw Fees (3%) (₹)': Math.round((f.withdrawAmount || 0) * 0.03 * 100) / 100,
-      'Reason / Remarks': f.reason || f.remarks || 'N/A',
-      'Date': f.createdAt ? new Date(f.createdAt).toLocaleDateString('en-IN') : (f.month || 'N/A')
+      'Reason / Remarks': f.reasonOfWithdraw || f.reason || f.remarks || '-',
+      'Date': f.createdAt ? new Date(f.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : (f.month || '-')
     }));
 
     const ws = XLSX.utils.json_to_sheet(excelData);
