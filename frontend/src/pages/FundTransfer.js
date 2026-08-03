@@ -160,6 +160,38 @@ export default function FundTransfer() {
     }
   };
 
+  // Helper: parse payment dates (handles ISO strings, "24 Jul", "24-07-2026", etc.)
+  const parsePaymentDate = (p) => {
+    if (p.createdAt) {
+      const d = new Date(p.createdAt);
+      if (!isNaN(d.getTime())) return d;
+    }
+    if (p.paymentDoneOn) {
+      const str = String(p.paymentDoneOn).trim();
+      if (!str) return null;
+      let d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        if (d.getFullYear() < 2020) d.setFullYear(parseInt(selectedYear || new Date().getFullYear()));
+        return d;
+      }
+      const parts = str.split(/[-/ ]/);
+      if (parts.length >= 2) {
+        const day = parseInt(parts[0]);
+        const monthStr = parts[1];
+        let monthIdx = parseInt(monthStr) - 1;
+        if (isNaN(monthIdx)) {
+          monthIdx = MONTHS.findIndex(m => m.toLowerCase().startsWith(monthStr.toLowerCase()));
+        }
+        let year = parts[2] ? parseInt(parts[2]) : parseInt(selectedYear || new Date().getFullYear());
+        if (year < 100) year += 2000;
+        if (!isNaN(day) && monthIdx >= 0 && monthIdx < 12) {
+          return new Date(year, monthIdx, day);
+        }
+      }
+    }
+    return null;
+  };
+
   // Filter payments by date, TL, and FSE
   const filteredPayments = useMemo(() => {
     const now = new Date();
@@ -167,29 +199,31 @@ export default function FundTransfer() {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
     return payments.filter(p => {
-      const d = new Date(p.createdAt || p.paymentDoneOn);
-      if (isNaN(d.getTime())) return true; // no date — always include
-      if (dateFilter === 'today' && d < today) return false;
-      if (dateFilter === 'month' && d < monthStart) return false;
-      if (dateFilter === 'custom') {
-        if (fromDate && d < new Date(fromDate)) return false;
-        if (toDate && d > new Date(toDate + 'T23:59:59')) return false;
+      const d = parsePaymentDate(p);
+      if (d) {
+        if (dateFilter === 'today' && d < today) return false;
+        if (dateFilter === 'month' && d < monthStart) return false;
+        if (dateFilter === 'custom') {
+          if (fromDate && d < new Date(fromDate)) return false;
+          if (toDate && d > new Date(toDate + 'T23:59:59')) return false;
+        }
+        if (selectedYear && selectedYear !== 'all' && selectedYear !== 'ALL') {
+          if (d.getFullYear() !== parseInt(selectedYear)) return false;
+        }
+        if (selectedMonth && selectedMonth !== 'all' && selectedMonth !== 'ALL') {
+          if (MONTHS[d.getMonth()] !== selectedMonth) return false;
+        }
       }
-      if (selectedYear && d.getFullYear() !== parseInt(selectedYear)) return false;
-      if (selectedMonth && MONTHS[d.getMonth()] !== selectedMonth) return false;
-      
+
       // TL filter: show ONLY the selected TL's own received payments
       // AND FSE-type payments to FSEs who are directly under that TL in TideBT_Access
       if (selectedTlFilter) {
         const tlLower = selectedTlFilter.toLowerCase();
         const isTlType = (p.transferToWhom || '').toLowerCase().includes('tl') ||
                          (p.transferToWhom || '').toLowerCase().includes('manager');
-        // Match TL's own received fund: must be TL/Mgr type AND transferTo contains TL name
         const isReceiverTL = isTlType && (p.transferTo || '').toLowerCase().includes(tlLower);
-        // Match FSE-type payment to FSE directly under this TL
-        const isFseType = !isTlType;
-        const isReceiverFseUnderTL = isFseType && fses.some(f => 
-          f.name === p.transferTo && 
+        const isReceiverFseUnderTL = !isTlType && fses.some(f =>
+          f.name === p.transferTo &&
           (f.reportingManager || '').toLowerCase() === tlLower
         );
         if (!isReceiverTL && !isReceiverFseUnderTL) return false;
@@ -212,21 +246,27 @@ export default function FundTransfer() {
 
     return mobikwikForms.filter(f => {
       const d = new Date(f.createdAt || f.transactionDate);
-      if (dateFilter === 'today' && d < today) return false;
-      if (dateFilter === 'month' && d < monthStart) return false;
-      if (dateFilter === 'custom') {
-        if (fromDate && d < new Date(fromDate)) return false;
-        if (toDate && d > new Date(toDate + 'T23:59:59')) return false;
+      if (!isNaN(d.getTime())) {
+        if (dateFilter === 'today' && d < today) return false;
+        if (dateFilter === 'month' && d < monthStart) return false;
+        if (dateFilter === 'custom') {
+          if (fromDate && d < new Date(fromDate)) return false;
+          if (toDate && d > new Date(toDate + 'T23:59:59')) return false;
+        }
+        if (selectedYear && selectedYear !== 'all' && selectedYear !== 'ALL') {
+          if (d.getFullYear() !== parseInt(selectedYear)) return false;
+        }
+        if (selectedMonth && selectedMonth !== 'all' && selectedMonth !== 'ALL') {
+          if (MONTHS[d.getMonth()] !== selectedMonth) return false;
+        }
       }
-      if (selectedYear && d.getFullYear() !== parseInt(selectedYear)) return false;
-      if (selectedMonth && MONTHS[d.getMonth()] !== selectedMonth) return false;
-      
-      // TL filter: match TL directly OR FSE who reports to that TL
+
+      // TL filter
       if (selectedTlFilter) {
         const tlLower = selectedTlFilter.toLowerCase();
-        const isFseUnderTL = fses.some(fs => fs.name === f.employeeName && 
+        const isFseUnderTL = fses.some(fs => fs.name === f.employeeName &&
           ((fs.reportingManager || '').toLowerCase().includes(tlLower)));
-        const isTlMatch = (f.tl || '').toLowerCase().includes(tlLower) || 
+        const isTlMatch = (f.tl || '').toLowerCase().includes(tlLower) ||
                           tlLower.includes((f.tl || '').toLowerCase().split(' ')[0]);
         if (!isTlMatch && !isFseUnderTL) return false;
       }
