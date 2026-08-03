@@ -4,7 +4,9 @@ import {
   TableHead, TableRow, Paper, CircularProgress, Pagination,
   Card, CardContent, Grid, TextField, MenuItem, Button, Autocomplete
 } from '@mui/material';
+import DownloadIcon from '@mui/icons-material/Download';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5001/api';
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -119,6 +121,27 @@ export default function MobikwikForms() {
     setPage(1);
   };
 
+  const handleExportExcel = () => {
+    if (!filteredForms || filteredForms.length === 0) return;
+
+    const excelData = filteredForms.map((f, idx) => ({
+      'S.No': idx + 1,
+      'Customer Name': f.customerName || 'N/A',
+      'Phone Number': f.customerPhone || f.phoneNumber || 'N/A',
+      'Employee Name': f.employeeName || f.fse || 'N/A',
+      'TL Name': f.tl || 'N/A',
+      'Withdraw Amount (₹)': f.withdrawAmount || 0,
+      'Withdraw Fees (3%) (₹)': Math.round((f.withdrawAmount || 0) * 0.03 * 100) / 100,
+      'Reason / Remarks': f.reason || f.remarks || 'N/A',
+      'Date': f.createdAt ? new Date(f.createdAt).toLocaleDateString('en-IN') : (f.month || 'N/A')
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Mobikwik Withdrawals');
+    XLSX.writeFile(wb, `Mobikwik_Withdrawals_${selectedMonth || 'All'}_${selectedYear || '2026'}.xlsx`);
+  };
+
   if (loading) {
     return <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px"><CircularProgress sx={{ color: '#7e22ce' }} /></Box>;
   }
@@ -128,12 +151,35 @@ export default function MobikwikForms() {
 
   return (
     <Box p={3}>
-      <Typography variant="h4" fontWeight={700} sx={{ color: '#7e22ce' }} gutterBottom>
-        Mobikwik Withdrawal Forms
-      </Typography>
-      <Typography variant="body2" color="text.secondary" mb={3}>
-        Logged withdrawals and fees recorded by ground team
-      </Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+        <Box>
+          <Typography variant="h4" fontWeight={700} sx={{ color: '#7e22ce' }}>
+            Mobikwik Withdrawal Forms
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Logged withdrawals and fees recorded by ground team
+          </Typography>
+        </Box>
+        <Button
+          variant="contained"
+          startIcon={<DownloadIcon />}
+          onClick={handleExportExcel}
+          disabled={filteredForms.length === 0}
+          sx={{
+            bgcolor: '#7e22ce',
+            color: '#fff',
+            fontWeight: 700,
+            borderRadius: 2,
+            px: 3,
+            py: 1,
+            textTransform: 'none',
+            boxShadow: '0 4px 14px rgba(126, 34, 206, 0.3)',
+            '&:hover': { bgcolor: '#6b21a8' }
+          }}
+        >
+          Export Excel ({filteredForms.length})
+        </Button>
+      </Box>
 
       {/* Filter Section */}
       <Card sx={{ mb: 3, borderRadius: 2, border: '1.5px solid #e1bee7', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
