@@ -1,14 +1,3 @@
-/**
- * Sync TL & FSE Opening Balances from Google Sheets (FT tab) to MongoDB
- * Actual sheet layout (Row 2 = real headers):
- *   A: FSE Name
- *   C: Opening Balance of TL
- *   D: TL NAME
- *   I: Opening Balance of FSE
- *   J: TL Name (for FSE)
- *   K: FSE Name (same as A, second column)
- */
-
 const { google } = require('googleapis');
 const mongoose  = require('mongoose');
 const path      = require('path');
@@ -16,17 +5,13 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 async function run() {
   const targetMonth = process.argv[2] || 'July';
-  const targetYear = parseInt(process.argv[3]) || 2026;
+  const targetYear  = parseInt(process.argv[3]) || 2026;
 
   const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
   const sheetId  = process.env.TIDEBT_SHEET_ID || process.env.GOOGLE_SHEET_ID_2;
 
-  if (!mongoUri) {
-    console.error('❌ MONGODB_URI/MONGO_URI not found in .env');
-    process.exit(1);
-  }
-  if (!sheetId) {
-    console.error('❌ TIDEBT_SHEET_ID/GOOGLE_SHEET_ID_2 not found in .env');
+  if (!mongoUri || !sheetId) {
+    console.error('❌ Missing MONGODB_URI or sheet ID in .env');
     process.exit(1);
   }
 
@@ -42,12 +27,12 @@ async function run() {
   console.log(`📥 Fetching FT tab (Columns A to K) for ${targetMonth} ${targetYear}...`);
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
-    range: 'FT!A:K' // Fetches columns A through K
+    range: 'FT!A:K'
   });
 
   const rows = res.data.values || [];
   if (rows.length < 3) {
-    console.log('❌ No data found in sheet (need at least 3 rows — title, headers, data).');
+    console.log('❌ No data found in sheet.');
     return;
   }
 
@@ -101,18 +86,13 @@ async function run() {
   const db = mongoose.connection.db;
   const collectionName = 'TideBT_OpeningBalances';
 
-  // Delete old data for this specific month/year OR any legacy untagged records
-  await db.collection(collectionName).deleteMany({
-    $or: [
-      { month: targetMonth, year: targetYear },
-      { month: { $exists: false } }
-    ]
-  });
-  console.log(`Cleared existing records for ${targetMonth} ${targetYear} in '${collectionName}'.`);
+  // Wipe ALL old untagged/duplicate documents
+  const r = await db.collection(collectionName).deleteMany({});
+  console.log(`🧹 Cleaned all ${r.deletedCount} old records in '${collectionName}'.`);
 
   if (docs.length > 0) {
     await db.collection(collectionName).insertMany(docs);
-    console.log(`✅ Successfully synced ${docs.length} records for ${targetMonth} ${targetYear} to MongoDB collection '${collectionName}'.`);
+    console.log(`✅ Successfully inserted ${docs.length} fresh records with month="${targetMonth}", year=${targetYear}!`);
   }
 
   await mongoose.connection.close();
