@@ -99,7 +99,7 @@ export default function FundTransfer() {
     const cacheKey = 'FUND_TRANSFER_MAIN';
     if (!forceRefresh) {
       const cached = getOverviewCache(cacheKey);
-      if (cached) {
+      if (cached && cached.payments && cached.payments.length > 0) {
         setFses(cached.fses);
         setTls(cached.tls);
         setPayments(cached.payments);
