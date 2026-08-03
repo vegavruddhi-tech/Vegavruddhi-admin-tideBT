@@ -292,7 +292,7 @@ function KpiDrillContent({ kpiDrillData, kpiType, rewardPassData, selectedMonth,
       </Box>
     </Box>
   );
-
+}
 
 export default function Dashboard() {
   const [allForms, setAllForms] = useState([]);
