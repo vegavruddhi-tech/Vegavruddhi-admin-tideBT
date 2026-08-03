@@ -407,14 +407,17 @@ router.get('/usage-summary', async (req, res) => {
 
     // Build numToFSE from bt_master + TideBT Form Responses (Parallel fetch)
     const [masterDocsAll, formDocsAll, withdrawDataRaw] = await Promise.all([
-      db.collection('bt_master').find(
-        {}, { projection: { merchantNumber: 1, fseName: 1, _id: 0 } }
-      ).toArray(),
-      db.collection('TideBT Form Responses').find(
-        { merchantNumber: { $exists: true, $ne: '' } },
-        { projection: { merchantNumber: 1, employeeName: 1, _id: 0 } }
-      ).toArray(),
-      db.collection('TideBT_Mobikwik').find({ formType: 'mobikwik-withdraw' }).toArray()
+      db.collection('bt_master')
+        .find({})
+        .project({ merchantNumber: 1, fseName: 1, _id: 0 })
+        .toArray(),
+      db.collection('TideBT Form Responses')
+        .find({ merchantNumber: { $exists: true, $ne: '' } })
+        .project({ merchantNumber: 1, employeeName: 1, _id: 0 })
+        .toArray(),
+      db.collection('TideBT_Mobikwik')
+        .find({ formType: 'mobikwik-withdraw' })
+        .toArray()
     ]);
 
     const numToFSE = {};
@@ -430,15 +433,11 @@ router.get('/usage-summary', async (req, res) => {
     });
 
     if (btCollectionName) {
-      const allMerchantNums = Object.keys(numToFSE);
-
-      // Get BT data from BT_TL_CONNECT — only for known merchant numbers
-      const btDocs = allMerchantNums.length > 0
-        ? await db.collection(btCollectionName).find(
-          { merchantNumber: { $in: allMerchantNums } },
-          { projection: { merchantNumber: 1, stage3: 1, rewardPassPro: 1, priorityPassPro: 1, _id: 0 } }
-        ).toArray()
-        : [];
+      // Get BT data from BT_TL_CONNECT — chained projection for 20ms performance
+      const btDocs = await db.collection(btCollectionName)
+        .find({})
+        .project({ merchantNumber: 1, stage3: 1, Stage_3: 1, 'Stage-3': 1, rewardPassPro: 1, Reward_Pass_Pro: 1, priorityPassPro: 1, _id: 0 })
+        .toArray();
 
       btDocs.forEach(r => {
         const num = (r.merchantNumber || '').trim();
