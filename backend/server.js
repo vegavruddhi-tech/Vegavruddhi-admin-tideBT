@@ -62,13 +62,20 @@ app.use('/api/report', require('./routes/report'));
 
 // Health check
 app.get('/health', async (req, res) => {
+  try {
+    await connectDB();
+  } catch (e) {}
   const status = connectionManager.getStatus();
   const metrics = connectionManager.getMetrics();
   
   res.json({ 
-    status: status.status,
+    status: isConnected ? 'healthy' : status.status,
     service: 'Tide BT Admin Backend',
-    database: status,
+    database: {
+      ...status,
+      status: isConnected ? 'healthy' : 'unhealthy',
+      ready: isConnected || status.ready
+    },
     metrics: {
       uptime: metrics.uptimeFormatted,
       totalRequests: metrics.totalRequests,
