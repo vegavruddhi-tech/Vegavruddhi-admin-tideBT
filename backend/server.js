@@ -60,6 +60,15 @@ app.use('/api/targets', require('./routes/targets'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/report', require('./routes/report'));
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    status: 'healthy',
+    service: 'Tide BT Admin Backend',
+    message: 'Tide BT Admin Backend API is running successfully!'
+  });
+});
+
 // Health check
 app.get('/health', async (req, res) => {
   try {
