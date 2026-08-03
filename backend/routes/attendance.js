@@ -10,15 +10,10 @@ router.get('/admin/all', async (req, res) => {
 
     // Step 1: Get all TideBT FSE and TL names from TideBT_Access
     const accessList = await db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray();
-    const fseNameSet = new Set(accessList.map(a => (a.fseName || '').trim()).filter(Boolean));
-    const tlNameSet  = new Set(accessList.map(a => (a.tlName  || '').trim()).filter(Boolean));
 
-    // Build person map — each person with their primary role
-    // If someone is BOTH fseName and tlName → show as 'teamlead' (TL takes priority for attendance display)
-    // But keep ONE record per person (no duplicates)
     const personMap = {}; // nameLower → { name, userType, tlName, reportingManager }
 
-    // Add FSEs first
+    // Add FSEs
     accessList.forEach(a => {
       const fseName = (a.fseName || '').trim();
       if (!fseName) return;
@@ -33,12 +28,11 @@ router.get('/admin/all', async (req, res) => {
       }
     });
 
-    // Add/upgrade TLs — if already exists as FSE, upgrade to teamlead
+    // Add/upgrade TLs
     accessList.forEach(a => {
       const tlName = (a.tlName || '').trim();
       if (!tlName) return;
       const key = tlName.toLowerCase();
-      // TL who is also an FSE gets shown as teamlead
       personMap[key] = {
         name: personMap[key]?.name || tlName,
         userType: 'teamlead',
@@ -48,19 +42,20 @@ router.get('/admin/all', async (req, res) => {
     });
 
     const allPersons = Object.values(personMap);
-    const allNames   = allPersons.map(p => p.name);
-
-    // Step 2: Fetch attendance for those names — from any source
-    // Note: some records may have source=undefined (from non-TideBT logins on same day)
     const queryDate = date || new Date().toISOString().split('T')[0];
-    const query = { date: queryDate };
-    if (allNames.length > 0) {
-      query.userName = { $in: allNames.map(n => new RegExp(`^\\s*${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')) };
-    }
 
-    const attendanceRecords = await db.collection('Attendance').find(query).sort({ firstLoginTime: 1 }).toArray();
+    // Fetch attendance records for the date
+    const rawRecords = await db.collection('Attendance')
+      .find({ date: queryDate })
+      .sort({ firstLoginTime: 1 })
+      .toArray();
 
-    // Step 3: For absent members — create absent records for those not in attendance
+    // Filter in JS for TideBT members only
+    const attendanceRecords = rawRecords.filter(r => {
+      const key = (r.userName || '').trim().toLowerCase();
+      return personMap[key] !== undefined;
+    });
+
     const presentNames = new Set(attendanceRecords.map(r => (r.userName || '').trim().toLowerCase()));
 
     const absentRecords = [];
@@ -77,7 +72,6 @@ router.get('/admin/all', async (req, res) => {
       }
     }
 
-    // Enrich attendance records with userType from personMap (in case it's missing)
     const enriched = attendanceRecords.map(r => {
       const key = (r.userName || '').trim().toLowerCase();
       const person = personMap[key];
@@ -105,24 +99,24 @@ router.get('/admin/summary', async (req, res) => {
     const { date } = req.query;
 
     const accessList = await db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray();
-    const fseNameSet = new Set(accessList.map(a => (a.fseName || '').trim()).filter(Boolean));
-    const tlNameSet  = new Set(accessList.map(a => (a.tlName  || '').trim()).filter(Boolean));
+    const personMap = {};
+    accessList.forEach(a => {
+      if (a.fseName) personMap[a.fseName.trim().toLowerCase()] = true;
+      if (a.tlName)  personMap[a.tlName.trim().toLowerCase()]  = true;
+    });
 
-    // Unique names — TL takes priority for deduplication
-    const allNamesSet = new Set();
-    fseNameSet.forEach(n => allNamesSet.add(n));
-    tlNameSet.forEach(n => allNamesSet.add(n));
-    const allNames = [...allNamesSet];
-
+    const totalPersonsCount = Object.keys(personMap).length;
     const query = {};
     if (date) query.date = date;
-    if (allNames.length > 0) {
-      query.userName = { $in: allNames.map(n => new RegExp(`^\\s*${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')) };
-    }
 
-    const records = await db.collection('Attendance').find(query).toArray();
+    const rawRecords = await db.collection('Attendance').find(query).toArray();
+    const records = rawRecords.filter(r => {
+      const key = (r.userName || '').trim().toLowerCase();
+      return personMap[key] === true;
+    });
+
     const present = records.filter(r => r.status === 'present' || r.firstLoginTime).length;
-    const absent  = allNames.length - present;
+    const absent  = totalPersonsCount - present;
     const relogins = records.reduce((s, r) => s + (r.reloginCount || 0), 0);
 
     res.json({
@@ -131,7 +125,7 @@ router.get('/admin/summary', async (req, res) => {
       totalPresent: present,
       totalAbsent: Math.max(0, absent),
       totalRelogins: relogins,
-      total: allNames.length,
+      total: totalPersonsCount,
     });
   } catch (err) {
     console.error('Attendance summary error:', err.message);
@@ -140,8 +134,6 @@ router.get('/admin/summary', async (req, res) => {
 });
 
 // GET /api/attendance/admin/monthly?year=2026&month=7
-// Returns per-person attendance summary for the whole month:
-// { name, userType, tlName, daysPresent, daysAbsent, totalWorkingDays, attendancePercent, dates: ['2026-07-01', ...] }
 router.get('/admin/monthly', async (req, res) => {
   try {
     const db = req.db;
@@ -150,17 +142,12 @@ router.get('/admin/monthly', async (req, res) => {
     const y = parseInt(year  || new Date().getFullYear());
     const m = parseInt(month || (new Date().getMonth() + 1));
 
-    // Build date range:
-    // - Current month → TODAY to month end inclusive (remaining days including today)
-    // - Past/future months → 1st to last day of month (full month)
-    const now        = new Date();
-    const todayIST   = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-    // Normalize to midnight to avoid time-of-day comparison issues
+    const now          = new Date();
+    const todayIST     = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
     const todayMidnight = new Date(todayIST.getFullYear(), todayIST.getMonth(), todayIST.getDate());
-    const monthEnd   = new Date(y, m, 0); // last day of month at midnight
+    const monthEnd     = new Date(y, m, 0);
     const isCurrentMonth = y === todayIST.getFullYear() && m === (todayIST.getMonth() + 1);
 
-    // Start: today (midnight) for current month, 1st for past/future months
     const startDay = isCurrentMonth
       ? todayMidnight
       : new Date(y, m - 1, 1);
@@ -171,7 +158,6 @@ router.get('/admin/monthly', async (req, res) => {
     }
     const totalWorkingDays = allDates.length;
 
-    // Get all TideBT persons
     const accessList = await db.collection('TideBT_Access').find({ hasTideBTAccess: true }).toArray();
     const personMap = {};
     accessList.forEach(a => {
@@ -189,16 +175,19 @@ router.get('/admin/monthly', async (req, res) => {
       personMap[key] = { name: personMap[key]?.name || tlName, userType: 'teamlead', tlName };
     });
     const allPersons = Object.values(personMap);
-    const allNames   = allPersons.map(p => p.name);
 
-    // Fetch all attendance records for this month in ONE query
-    const records = await db.collection('Attendance').find({
-      date:     { $gte: allDates[0], $lte: allDates[allDates.length - 1] },
-      userName: { $in: allNames.map(n => new RegExp(`^\\s*${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')) }
+    // Fetch attendance for date range
+    const rawRecords = await db.collection('Attendance').find({
+      date: { $gte: allDates[0] || `${y}-${String(m).padStart(2, '0')}-01`, $lte: allDates[allDates.length - 1] || `${y}-${String(m).padStart(2, '0')}-31` }
     }).toArray();
 
-    // Build per-person present dates set
-    const presentDatesMap = {}; // nameLower → Set of dates
+    // Filter in JS for TideBT members
+    const records = rawRecords.filter(r => {
+      const key = (r.userName || '').trim().toLowerCase();
+      return personMap[key] !== undefined;
+    });
+
+    const presentDatesMap = {};
     records.forEach(r => {
       if (r.status !== 'present' && !r.firstLoginTime) return;
       const key = (r.userName || '').trim().toLowerCase();
@@ -206,9 +195,8 @@ router.get('/admin/monthly', async (req, res) => {
       presentDatesMap[key].add(r.date);
     });
 
-    // Build summary per person
     const summary = allPersons.map(p => {
-      const key         = p.name.toLowerCase();
+      const key          = p.name.toLowerCase();
       const presentDates = presentDatesMap[key] || new Set();
       const daysPresent  = presentDates.size;
       const daysAbsent   = totalWorkingDays - daysPresent;
@@ -224,7 +212,6 @@ router.get('/admin/monthly', async (req, res) => {
       };
     });
 
-    // Sort: TLs first, then by daysPresent desc
     summary.sort((a, b) => {
       if (a.userType !== b.userType) return a.userType === 'teamlead' ? -1 : 1;
       return b.daysPresent - a.daysPresent;
