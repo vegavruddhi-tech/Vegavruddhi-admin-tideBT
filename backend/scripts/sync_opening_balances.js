@@ -15,6 +15,9 @@ const path      = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 async function run() {
+  const targetMonth = process.argv[2] || 'July';
+  const targetYear = parseInt(process.argv[3]) || 2026;
+
   const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
   const sheetId  = process.env.TIDEBT_SHEET_ID || process.env.GOOGLE_SHEET_ID_2;
 
@@ -36,7 +39,7 @@ async function run() {
   });
   const sheets = google.sheets({ version: 'v4', auth });
 
-  console.log('📥 Fetching FT tab (Columns A to K)...');
+  console.log(`📥 Fetching FT tab (Columns A to K) for ${targetMonth} ${targetYear}...`);
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
     range: 'FT!A:K' // Fetches columns A through K
@@ -48,11 +51,6 @@ async function run() {
     return;
   }
 
-  // Row 1 (index 0) is a title/summary row — skip it
-  // Row 2 (index 1) is the real headers row
-  console.log(`Headers row:`, rows[1]);
-
-  // Helper to parse numeric values safely
   const parseAmount = (val) => {
     if (!val) return 0;
     const str = String(val).trim();
@@ -63,27 +61,10 @@ async function run() {
 
   const docs = [];
 
-  // Range is A:K so indexes (0-based) are:
-  // Column A (0): FSE Name
-  // Column B (1): (empty/unused)
-  // Column C (2): Opening Balance of TL
-  // Column D (3): TL NAME
-  // Column E (4): Received
-  // Column F (5): Send to
-  // Column G (6): In Hand
-  // Column H (7): (empty/unused)
-  // Column I (8): Opening Balance of FSE
-  // Column J (9): TL Name (for FSE)
-  // Column K (10): FSE Name (alternative column)
-
-  // Skip rows 0 (title) and 1 (headers) — data starts at row index 2
   rows.slice(2).forEach((row) => {
-    // Process TL Row Data (columns C and D)
     const tlName = (row[3] || '').trim();
     const tlBalance = parseAmount(row[2]);
-    
-    // Process FSE Row Data — FSE name is in col A (index 0) or col K (index 10)
-    // Prefer col A; fall back to col K
+
     const fseNameA = (row[0]  || '').trim();
     const fseNameK = (row[10] || '').trim();
     const fseName  = fseNameA || fseNameK;
@@ -95,6 +76,8 @@ async function run() {
         type: 'TL',
         name: tlName,
         openingBalance: tlBalance,
+        month: targetMonth,
+        year: targetYear,
         _syncedAt: new Date()
       });
     }
@@ -105,26 +88,26 @@ async function run() {
         name: fseName,
         openingBalance: fseBalance,
         tlName: fseTLName || null,
+        month: targetMonth,
+        year: targetYear,
         _syncedAt: new Date()
       });
     }
   });
 
-  console.log(`\nParsed ${docs.length} records (${docs.filter(d => d.type === 'TL').length} TLs, ${docs.filter(d => d.type === 'FSE').length} FSEs).`);
+  console.log(`\nParsed ${docs.length} records (${docs.filter(d => d.type === 'TL').length} TLs, ${docs.filter(d => d.type === 'FSE').length} FSEs) for ${targetMonth} ${targetYear}.`);
 
-  // Connect and Save to MongoDB
-  await mongoose.connect(mongoUri, { dbName: 'CompanyDB' });
+  await mongoose.connect(mongoUri);
   const db = mongoose.connection.db;
-
   const collectionName = 'TideBT_OpeningBalances';
-  
-  // Clear old data first
-  await db.collection(collectionName).deleteMany({});
-  console.log(`Cleared existing records in '${collectionName}'.`);
+
+  // Delete ONLY old data for this specific month/year
+  await db.collection(collectionName).deleteMany({ month: targetMonth, year: targetYear });
+  console.log(`Cleared existing records for ${targetMonth} ${targetYear} in '${collectionName}'.`);
 
   if (docs.length > 0) {
     await db.collection(collectionName).insertMany(docs);
-    console.log(`✅ Successfully synced ${docs.length} records to MongoDB collection '${collectionName}'.`);
+    console.log(`✅ Successfully synced ${docs.length} records for ${targetMonth} ${targetYear} to MongoDB collection '${collectionName}'.`);
   }
 
   await mongoose.connection.close();

@@ -572,22 +572,23 @@ router.get('/usage-summary', async (req, res) => {
 
     let carryMap = {};
     // ── Carry forward from TideBT_OpeningBalances ──────────────────────────
-    // Data is synced for July 2026 (carry forward from June).
-    // Only show carry forward for July — all other months show 0.
-    const OPENING_BALANCE_MONTH = 'July';
-    const OPENING_BALANCE_YEAR = 2026;
+    // ── Carry forward from TideBT_OpeningBalances ──────────────────────────
+    // Matches selectedMonth and selectedYear (e.g. July 2026, August 2026, etc.)
+    if (selectedMonth && selectedMonth !== 'all' && selectedMonth !== 'ALL') {
+      const targetYr = parseInt(selectedYear || 2026);
+      const openingBalances = await db.collection('TideBT_OpeningBalances').find({
+        $or: [
+          { month: selectedMonth, year: targetYr },
+          { month: { $exists: false } } // fallback for legacy un-tagged July records
+        ]
+      }).toArray();
 
-    if (selectedMonth === OPENING_BALANCE_MONTH && parseInt(selectedYear) === OPENING_BALANCE_YEAR) {
-      const openingBalances = await db.collection('TideBT_OpeningBalances').find({}).toArray();
       openingBalances.forEach(b => {
         const nameLower = (b.name || '').trim().toLowerCase();
         if (!nameLower || nameLower === '0') return;
         const bal = Math.round(b.openingBalance || 0);
-        if (bal <= 0) return; // skip zero/negative
+        if (bal <= 0) return;
 
-        // For TL-type records: only apply to names classified as TL in nameRoleMap
-        // For FSE-type records: only apply to names classified as FSE in nameRoleMap
-        // This prevents FSE opening balances from appearing under TL entries and vice versa
         const roleInSummary = nameRoleMap[
           names.find(n => n.toLowerCase().trim() === nameLower) || ''
         ];
@@ -598,14 +599,12 @@ router.get('/usage-summary', async (req, res) => {
         } else if (obType === 'FSE' && roleInSummary === "FSE Ground Team") {
           carryMap[nameLower] = bal;
         } else if (!obType) {
-          // No type field — apply to whoever matches the name
           carryMap[nameLower] = bal;
         }
-        // else: type mismatch (TL ob for FSE name or vice versa) — skip
       });
-      console.log(`[Carry Forward] Loaded ${Object.keys(carryMap).length} entries from TideBT_OpeningBalances for ${OPENING_BALANCE_MONTH} ${OPENING_BALANCE_YEAR}`);
+      console.log(`[Carry Forward] Loaded ${Object.keys(carryMap).length} entries from TideBT_OpeningBalances for ${selectedMonth} ${targetYr}`);
     } else {
-      console.log(`[Carry Forward] Month ${selectedMonth} ${selectedYear} — no opening balances synced, showing ₹0`);
+      console.log(`[Carry Forward] All months view — showing ₹0 opening balance default`);
     }
 
     // ── Calculate usage per person ─────────────────────────────────────────
