@@ -944,29 +944,21 @@ export default function Dashboard() {
   const renderDialogContent = () => {
     if (dialogLoading) return <Box display="flex" justifyContent="center" py={4}><CircularProgress /></Box>;
 
-    // Limit dialog data to first 300 for performance — large datasets freeze the UI
+    if (['kpi-bt-completed', 'kpi-yesterday-bt', 'kpi-rp-purchased', 'kpi-rp-active', 'kpi-rp-pending', 'kpi-pass-live', 'kpi-pending-bt', 'kpi-total-merchants', 'kpi-active-fse'].includes(dialogType)) {
+      return (
+        <KpiDrillContent 
+          kpiDrillData={dialogData} 
+          kpiType={dialogType} 
+          rewardPassData={rewardPassData} 
+          selectedMonth={selectedMonth} 
+          selectedYear={selectedYear} 
+        />
+      );
+    }
+
     const MAX_DIALOG_ROWS = 300;
     const displayData = dialogData.length > MAX_DIALOG_ROWS ? dialogData.slice(0, MAX_DIALOG_ROWS) : dialogData;
     const isTruncated = dialogData.length > MAX_DIALOG_ROWS;
-
-    if (['kpi-bt-completed', 'kpi-yesterday-bt', 'kpi-rp-purchased', 'kpi-rp-active', 'kpi-rp-pending', 'kpi-pass-live', 'kpi-pending-bt', 'kpi-total-merchants', 'kpi-active-fse'].includes(dialogType)) {
-      return (
-        <>
-          {isTruncated && (
-            <Box sx={{ px: 2, py: 1, bgcolor: '#fff3e0', borderRadius: 1, mb: 1, fontSize: 12, color: '#e65100' }}>
-              Showing top {MAX_DIALOG_ROWS} of {dialogData.length} records
-            </Box>
-          )}
-          <KpiDrillContent 
-            kpiDrillData={displayData} 
-            kpiType={dialogType} 
-            rewardPassData={rewardPassData} 
-            selectedMonth={selectedMonth} 
-            selectedYear={selectedYear} 
-          />
-        </>
-      );
-    }
 
     if (dialogData.length === 0) return <Typography color="text.secondary" textAlign="center" py={4}>No data available</Typography>;
 
