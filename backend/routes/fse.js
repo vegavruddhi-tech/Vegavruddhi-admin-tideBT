@@ -28,25 +28,30 @@ function findBTCollection(allCollections, selectedMonth, selectedYear) {
 // GET /api/fse - Get all FSEs with Tide BT access
 router.get('/', async (req, res) => {
   try {
-    const db = req.db; // Use ConnectionManager db from middleware
-    
-    console.log('🔍 Fetching FSEs from TideBT_Access...');
-    
+    const db = req.db;
+    const ck = cacheKey('ALL_FSES');
+    const cached = await cacheGet(ck);
+    if (cached) return res.json(cached);
+
     // Get all unique FSEs from TideBT_Access collection (fseName field)
-    const accessList = await db.collection('TideBT_Access').find({ 
-      hasTideBTAccess: true 
-    }).toArray();
-    
+    const accessList = await db.collection('TideBT_Access')
+      .find({ hasTideBTAccess: true })
+      .project({ fseName: 1, fseEmail: 1, tlName: 1, createdAt: 1, _id: 0 })
+      .toArray();
+
     // Get employee details from Employees collection
-    const employees = await db.collection('Employees').find({}).toArray();
-    
+    const employees = await db.collection('Employees')
+      .find({})
+      .project({ newJoinerName: 1, newJoinerEmailId: 1, newJoinerPhone: 1, reportingManager: 1, _id: 0 })
+      .toArray();
+
     // Build FSE list with details — matching by email or fseName
     const fseList = accessList.map(accessRecord => {
-      const emp = employees.find(e => 
+      const emp = employees.find(e =>
         (accessRecord.fseEmail && e.newJoinerEmailId?.toLowerCase().trim() === accessRecord.fseEmail?.toLowerCase().trim()) ||
         (accessRecord.fseName && e.newJoinerName?.toLowerCase().trim() === accessRecord.fseName?.toLowerCase().trim())
       );
-      
+
       return {
         name: accessRecord.fseName || emp?.newJoinerName,
         phone: emp?.newJoinerPhone || '',
@@ -56,8 +61,10 @@ router.get('/', async (req, res) => {
         createdAt: accessRecord.createdAt || null
       };
     });
-    
-    res.json({ success: true, fses: fseList, total: fseList.length });
+
+    const result = { success: true, fses: fseList, total: fseList.length };
+    await cacheSet(ck, result, 86400);
+    res.json(result);
   } catch (error) {
     console.error('❌ Error fetching FSEs:', error);
     res.status(500).json({ success: false, error: error.message });

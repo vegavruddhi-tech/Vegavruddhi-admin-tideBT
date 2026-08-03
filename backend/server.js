@@ -17,42 +17,17 @@ const connectionManager = ConnectionManager.getInstance();
 let isConnected = false;
 
 async function connectDB() {
-  if (isConnected && mongoose.connection.readyState === 1) return;
+  if (isConnected && mongoose.connection.readyState === 1) return mongoose.connection.db;
   try {
     await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 10000,
+      serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
     });
     isConnected = true;
     connectionManager.setMongooseConnection(mongoose.connection);
-    console.log('✅ MongoDB Connected - Tide BT Admin Backend');
-
-    // Ensure database indexes exist for ultra-fast queries (background non-blocking)
-    (async () => {
-      try {
-        const db = mongoose.connection.db;
-        if (!db) return;
-        await Promise.all([
-          db.collection('bt_master').createIndex({ merchantNumber: 1 }),
-          db.collection('bt_master').createIndex({ fseName: 1, tl: 1 }),
-          db.collection('TideBT_Payments').createIndex({ transferTo: 1 }),
-          db.collection('TideBT_Payments').createIndex({ senderName: 1 }),
-          db.collection('TideBT_Access').createIndex({ tlName: 1 }),
-          db.collection('TideBT_Access').createIndex({ fseName: 1 }),
-          db.collection('TideBT Form Responses').createIndex({ merchantNumber: 1 })
-        ]);
-        const cols = (await db.listCollections().toArray()).map(c => c.name);
-        const btCols = cols.filter(c => c.toUpperCase().startsWith('BT_TL_CONNECT'));
-        for (const col of btCols) {
-          await db.collection(col).createIndex({ merchantNumber: 1 });
-        }
-        console.log('⚡ All MongoDB Atlas Indexes Verified/Created!');
-      } catch (idxErr) {
-        console.warn('Index creation notice:', idxErr.message);
-      }
-    })();
+    return mongoose.connection.db;
   } catch (err) {
     isConnected = false;
     console.error('❌ MongoDB Connection Error:', err.message);
@@ -60,32 +35,17 @@ async function connectDB() {
   }
 }
 
-// Ensure DB is connected before every request (critical for Vercel cold starts)
+// Single fast middleware to attach db to req
 app.use(async (req, res, next) => {
   try {
-    await connectDB();
+    const db = await connectDB();
+    req.db = db;
     next();
   } catch (err) {
     return res.status(503).json({
       success: false,
       error: 'Database connection unavailable',
       message: err.message
-    });
-  }
-});
-
-// Middleware to attach db to req
-app.use(async (req, res, next) => {
-  try {
-    await connectionManager.ensureInitialized();
-    req.db = connectionManager.getConnection();
-    next();
-  } catch (error) {
-    console.error('❌ Database connection error:', error.message);
-    res.status(503).json({ 
-      success: false, 
-      error: 'Database connection unavailable',
-      message: error.message 
     });
   }
 });

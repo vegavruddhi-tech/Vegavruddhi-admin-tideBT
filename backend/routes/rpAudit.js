@@ -1,11 +1,16 @@
 const express = require('express');
 const router = express.Router();
+const { cacheGet, cacheSet, cacheKey } = require('../utils/cache');
 
 // GET /api/rp-audit - RP Audit using per-month TideBT_OfficialData_<Month> collections
 router.get('/', async (req, res) => {
   try {
     const db = req.db;
     const { dateFilter, fromDate, toDate, selectedYear, selectedMonth } = req.query;
+
+    const ck = cacheKey('RP_AUDIT', dateFilter || 'ALL', fromDate || '', toDate || '', selectedYear || 'ALL', selectedMonth || 'ALL');
+    const cached = await cacheGet(ck);
+    if (cached) return res.json(cached);
 
     // ─── 1. Build date range for RP submissions filter ───────────────────────
     let dateStart = null;
@@ -203,7 +208,7 @@ router.get('/', async (req, res) => {
 
     const allAudit = [...fseAudit, ...tlAudit];
 
-    res.json({
+    const result = {
       success: true,
       audit:          fseAudit,
       tlAudit:        tlAudit,
@@ -216,7 +221,9 @@ router.get('/', async (req, res) => {
         totalClaimedRP:      allAudit.reduce((s, a) => s + a.totalClaimedRP, 0),
         totalActualOnboarded: allAudit.reduce((s, a) => s + a.actualOnboarded, 0)
       }
-    });
+    };
+    await cacheSet(ck, result, 86400);
+    res.json(result);
 
   } catch (error) {
     console.error('Error in RP audit:', error);

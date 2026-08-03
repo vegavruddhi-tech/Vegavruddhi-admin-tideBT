@@ -1,39 +1,35 @@
 const express = require('express');
 const router = express.Router();
+const { cacheGet, cacheSet, cacheKey } = require('../utils/cache');
 
 // GET /api/tl - Get all TLs with Tide BT access
 router.get('/', async (req, res) => {
   try {
-    const db = req.db; // Use ConnectionManager db from middleware
-    
-    console.log('🔍 Fetching TLs from TideBT_Access...');
-    
+    const db = req.db;
+    const ck = cacheKey('ALL_TLS');
+    const cached = await cacheGet(ck);
+    if (cached) return res.json(cached);
+
     // Get all unique TLs from TideBT_Access collection (tlName field)
-    const accessList = await db.collection('TideBT_Access').find({ 
-      hasTideBTAccess: true 
-    }).toArray();
-    
+    const accessList = await db.collection('TideBT_Access')
+      .find({ hasTideBTAccess: true })
+      .project({ tlName: 1, _id: 0 })
+      .toArray();
+
     // Get unique TL names
     const uniqueTLs = [...new Set(accessList.map(a => a.tlName))].filter(Boolean);
-    console.log(`✅ Found ${uniqueTLs.length} unique TLs in TideBT_Access:`, uniqueTLs);
-    
+
     // Get TL details from Employees collection
-    console.log('🔍 Looking for employees with names:', uniqueTLs);
-    
-    const employees = await db.collection('Employees').find({ 
-      newJoinerName: { $in: uniqueTLs } 
-    }).toArray();
-    console.log(`✅ Found ${employees.length} matching employees`);
-    
+    const employees = await db.collection('Employees')
+      .find({ newJoinerName: { $in: uniqueTLs } })
+      .project({ newJoinerName: 1, newJoinerPhone: 1, newJoinerEmailId: 1, _id: 0 })
+      .toArray();
+
     // Build TL list with FSE counts
-    const tlList = await Promise.all(uniqueTLs.map(async (tlName) => {
+    const tlList = uniqueTLs.map((tlName) => {
       const emp = employees.find(e => e.newJoinerName === tlName);
-      console.log(`Matching ${tlName}:`, emp ? 'Found' : 'Not found');
-      
-      // Count FSEs under this TL from TideBT_Access
       const fseCount = accessList.filter(a => a.tlName === tlName).length;
-      console.log(`FSE count for ${tlName}: ${fseCount}`);
-      
+
       return {
         name: tlName,
         phone: emp?.newJoinerPhone || '',
@@ -42,9 +38,11 @@ router.get('/', async (req, res) => {
         fseCount: fseCount,
         createdAt: null
       };
-    }));
-    
-    res.json({ success: true, tls: tlList, total: tlList.length });
+    });
+
+    const result = { success: true, tls: tlList, total: tlList.length };
+    await cacheSet(ck, result, 86400);
+    res.json(result);
   } catch (error) {
     console.error('❌ Error fetching TLs:', error);
     res.status(500).json({ success: false, error: error.message });
