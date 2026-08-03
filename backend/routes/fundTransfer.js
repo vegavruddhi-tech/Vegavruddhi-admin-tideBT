@@ -273,9 +273,29 @@ router.get('/usage-summary', async (req, res) => {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
       return items.filter(item => {
-        if (!item[dateField]) return false;
-        const d = new Date(item[dateField]);
+        const val = item[dateField] || item.paymentDoneOn || item.transactionDate || item.createdAt;
+        if (!val) return false;
+        let d = new Date(val);
+        if (isNaN(d.getTime())) {
+          const str = String(val).trim();
+          const parts = str.split(/[-/ ]/);
+          if (parts.length >= 2) {
+            const day = parseInt(parts[0]);
+            const monthStr = parts[1];
+            let monthIdx = parseInt(monthStr) - 1;
+            if (isNaN(monthIdx)) {
+              monthIdx = MONTHS.findIndex(m => m.toLowerCase().startsWith(monthStr.toLowerCase()));
+            }
+            let year = parts[2] ? parseInt(parts[2]) : parseInt(selectedYear || now.getFullYear());
+            if (year < 100) year += 2000;
+            if (!isNaN(day) && monthIdx >= 0 && monthIdx < 12) {
+              d = new Date(year, monthIdx, day);
+            }
+          }
+        }
         if (isNaN(d.getTime())) return false;
+        if (d.getFullYear() < 2020) d.setFullYear(parseInt(selectedYear || now.getFullYear()));
+
         if (dateFilter === 'today') return d >= today && d < new Date(today.getTime() + 86400000);
         if (dateFilter === 'month') return d >= monthStart && d <= monthEnd;
         if (dateFilter === 'custom') {
@@ -289,8 +309,8 @@ router.get('/usage-summary', async (req, res) => {
           }
           return true;
         }
-        if (selectedYear && d.getFullYear() !== parseInt(selectedYear)) return false;
-        if (selectedMonth && MONTHS[d.getMonth()] !== selectedMonth) return false;
+        if (selectedYear && selectedYear !== 'all' && selectedYear !== 'ALL' && d.getFullYear() !== parseInt(selectedYear)) return false;
+        if (selectedMonth && selectedMonth !== 'all' && selectedMonth !== 'ALL' && MONTHS[d.getMonth()] !== selectedMonth) return false;
         return true;
       });
     };
