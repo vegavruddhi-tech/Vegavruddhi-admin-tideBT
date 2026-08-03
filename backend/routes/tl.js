@@ -104,9 +104,6 @@ router.get('/:name', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
-
-const { cacheGet, cacheSet, cacheKey, cacheInvalidate } = require('../utils/cache');
-
 // Helper: find BT_TL_CONNECT collection — hardcoded canonical format "BT_TL_CONNECT [MONTH]"
 async function findBTCollection(db, selectedMonth, selectedYear) {
   if (!selectedMonth) return null;
